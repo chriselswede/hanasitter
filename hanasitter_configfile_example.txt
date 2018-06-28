@@ -1,0 +1,12 @@
+# collect traces if the CPU load is above 75% for more than 30s
+-cpu 1,3,10,75
+# collect traces if
+-cf "M_SERVICE_THREADS,WHERE,IS_ACTIVE='TRUE' and SERVICE_NAME='indexserver',1"
+# pause trace collection for 1 hour after we collected traces
+#-ar 3600
+# collect 3 kernel profiler traces
+-np 3
+# collect 3 rte dumps
+-nr 3
+# use recording mode 3
+-rm 3
