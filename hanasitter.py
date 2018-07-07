@@ -266,7 +266,8 @@ class HDBCONS:
             subprocess.check_output("chmod 777 "+path, shell=True)
     def clear(self):
         for path in self.temp_host_output_dirs:
-            subprocess.check_output("rm -r "+path, shell=True)
+            if os.path.isdir(path):
+                subprocess.check_output("rm -r "+path, shell=True)
 
         
 class CommunicationManager:
