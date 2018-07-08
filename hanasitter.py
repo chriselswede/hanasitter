@@ -41,7 +41,7 @@ def printHelp():
     print("         2. Where Clause Mode: any sys.m_* view, the keyword 'WHERE', the where clause and max number allowed feature occations, i.e.               ")
     print('            "<m_view 1>,WHERE,<where clause 1>,<limit 1>,...,<m_view N>,WHERE,<where clause N>,<limit N>"                                           ')
     print('         default: ""                                                                                                                                ')
-    print('         Note: <limit> should be an integer, or an integer preceded by < (fox maximum allowed) or > (for minumum allowed)                           ')
+    print('         Note: <limit> should be an integer, or an integer preceded by < (for maximum allowed) or > (for minumum allowed)                           ')
     print(" -if     number checks and intervals of checks, every odd item of this list specifies how many times each feature check (see -cf) should be executed")
     print("         and every even item specifies how many seconds it waits between each check, then the <max numbers X> in the -cf flag is the maximum        ")
     print("         allowed average value, e.g. <number checks 1>,<interval [s] 1>,...,<number checks N>,<interval [s] N>, default: [] (not used)              ")
@@ -81,6 +81,10 @@ def printHelp():
     print("                                       for -rm = 3: time the thread waits after an rte dump,     default: 60 seconds                                ")
     print(" -mr     rte dump mode [0 or 1], -mr = 0: normal rte dump,                                                                                          ")
     print("                                 -mr = 1: light rte dump mode, only rte dump with STACK_SHORT and THREADS sections, and some M_ views,  default: 0  ")
+    print("         *** KILL SESSIONS (use with care!) ***                                                                                                     ")
+    print(" -ks     kill session [list of true/false], list of booleans (length must be the same as number of features defined by -cf) that defines if -cf's   ")
+    print("         features could indicate that the sessions (connections) are tried to be disconnected or not, default: None (not used)                      ")
+    print("         Note: Requires SESSION ADMIN                                                                                                               ")
     print("         *** ADMINS (Output Directory, Logging, Output and DB User) ***                                                                             ")
     print(" -od     output directory, full path of the folder where all output files will end up (if the folder does not exist it will be created),            ")
     print("         default: '/tmp/hanasitter_output'                                                                                                          ")
@@ -279,7 +283,7 @@ class CommunicationManager:
         self.log_features = log_features     
         
 class CriticalFeature:
-    def __init__(self, view, feature, value, limit, stopSession = False):
+    def __init__(self, view, feature, value, limit, killSession = False):
         self.view = view
         self.feature = feature
         self.maxRepeat = None
@@ -315,12 +319,14 @@ class CriticalFeature:
             print "INPUT ERROR: 4th item of -cf must be either an integer or an integer preceded by < or >. Please see --help for more information."
             os._exit(1)
         self.limit = int(limit)
-        self.stopSession = stopSession
+        self.killSession = killSession
         self.whereClauseDescription = self.whereClause
         if is_integer(self.maxRepeat):
             self.whereClauseDescription = "column "+self.feature+" in "+self.view+" contains the string "+self.value+" more than "+self.maxRepeat+" times"
         self.nbrIterations = 1
         self.interval = 0 #[s]
+    def setKillSession(self, killSession):
+        self.killSession = killSession
     def setIterations(self, iterations, interval):
         self.nbrIterations = iterations
         self.interval = interval
@@ -473,6 +479,19 @@ def cpu_too_high(cpu_check_params, comman):
     printout = cpu_string+"  , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         , "+str(not too_high_cpu)+"       , Av. CPU = "+current_cpu+" % (Allowed = "+cpu_check_params[3]+" %) "
     log(printout, comman, sendEmail = too_high_cpu)
     return too_high_cpu
+
+def stop_session(cf, comman):
+    heather = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select top 1 * from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).splitlines(1)
+    heather = heather[0].strip('\n').strip(' ').split('|')
+    heather = [h.strip(' ') for h in heather if h != '']
+    if 'CONNECTION_ID' in heather:
+        connIds = subprocess.check_output(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).splitlines(1)
+        connIds = [c.strip('\n').strip('|').strip(' ') for c in connIds]
+        for connId in connIds:
+            printout = "Will disconnect session "+connId+" due to the check: "+cf.whereClauseDescription
+            log(printout, comman)
+            subprocess.check_output(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """, shell=True)
+        
 
 def feature_check(cf, nbrCriticalFeatures, critical_feature_info, comman):   # cf = critical_feature, # comman = communication manager
     #CHECKS
@@ -703,10 +722,9 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                     if comman.log_features:
                         log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
                     if hanging or wrong_number_critical_features:
+                        if cf.killSession:
+                            stop_session(cf, comman)
                         recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
-                        # if we want to cancel connections that are sending not allowed SQL statements do it here
-                        # if cf.cancelSessionIfCritical:
-                        #     cancel_session(cf)
         if not recorded:
             time.sleep(check_interval)
             if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
@@ -767,6 +785,7 @@ def main():
     feature_check_timeout = 60 #seconds
     #critical_features = ['M_SERVICE_THREADS','IS_ACTIVE','TRUE','30']  #one critical feature state with max allowed 30
     critical_features = [] # default: don't use critical feature check
+    kill_session = [] # default: do not kill any session
     intervals_of_features = [] #default only one check per feature
     after_recorded = -1 #default: exits after recorded
     std_out = "true" #print to std out
@@ -829,6 +848,8 @@ def main():
                         rtedumps_interval = flagValue
                     if firstWord == '-mr': 
                         rte_mode = flagValue
+                    if firstWord == '-ks': 
+                        kill_session = [x.strip('"') for x in flagValue.split(',')]
                     if firstWord == '-nc': 
                         num_callstacks = flagValue
                     if firstWord == '-ic': 
@@ -889,6 +910,8 @@ def main():
         rtedumps_interval = sys.argv[sys.argv.index('-ir') + 1]
     if '-mr' in sys.argv:
         rte_mode = sys.argv[sys.argv.index('-mr') + 1]
+    if '-ks' in sys.argv:
+        kill_session = [x.strip('"') for x in sys.argv[  sys.argv.index('-ks') + 1   ].split(',')] 
     if '-nc' in sys.argv:
         num_callstacks = sys.argv[sys.argv.index('-nc') + 1]
     if '-ic' in sys.argv:
@@ -1146,6 +1169,14 @@ def main():
         os._exit(1)
     critical_features = [critical_features[i*4:i*4+4] for i in range(len(critical_features)/4)]
     critical_features = [CriticalFeature(cf[0], cf[1], cf[2], cf[3]) for cf in critical_features] #testing cf[3] is done in the class
+    ### kill_session, -ks
+    if kill_session:
+        if not len(kill_session) == len(critical_features):
+            log("INPUT ERROR: -ks must be a list with the same length as number features specified with -cf. Please see --help for more information.", comman)
+            os._exit(1)
+        kill_session = [checkAndConvertBooleanFlag(ks, "-ks") for ks in kill_session]
+        for i in range(len(kill_session)):
+            critical_features[i].setKillSession(kill_session[i])
     ### intervals_of_features, -if
     if intervals_of_features:
         if len(intervals_of_features)%2:
@@ -1186,9 +1217,10 @@ def main():
         log("INPUT ERROR: If cpu checks with this intervall are to be done the cpu type cannot be zero. Please see --help for more information.", comman)
         os._exit(1)
     ### num_rtedumps, -nr, num_callstacks, -nc, num_gstacks, -ng, num_kprofs, -np, log_features, -lf
-    if (num_rtedumps <= 0 and num_callstacks <= 0 and num_gstacks <= 0 and num_kprofs <= 0 and log_features == False):
-        log("INPUT ERROR: No recording is specified (-nr, -nc, -ng, and -np are all <= 0, or none of them are specified and -lf = false). It then makes no sense to run hanasitter. Please see --help for more information.", comman)
-        os._exit(1)
+    if not kill_session:
+        if (num_rtedumps <= 0 and num_callstacks <= 0 and num_gstacks <= 0 and num_kprofs <= 0 and log_features == False):
+            log("INPUT ERROR: No kill-session and no recording is specified (-nr, -nc, -ng, and -np are all <= 0, or none of them are specified and -lf = false). It then makes no sense to run hanasitter. Please see --help for more information.", comman)
+            os._exit(1)
     ### email_notification, -en
     if email_notification:
         if not len(email_notification) == 3:
@@ -1273,7 +1305,9 @@ def main():
             else:
                 log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman)
                 time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
-    except:   
+    #except:           
+    except Exception as e: 
+        print e
         hdbcons.clear()    #remove temporary output folders before exit
         sys.exit()
           
