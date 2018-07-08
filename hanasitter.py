@@ -279,21 +279,35 @@ class CommunicationManager:
         self.log_features = log_features     
         
 class CriticalFeature:
-    def __init__(self, view, feature, value, limit):
+    def __init__(self, view, feature, value, limit, stopSession = False):
         self.view = view
         self.feature = feature
+        self.maxRepeat = None
         self.whereMode = (self.feature == 'WHERE')
         if self.whereMode:
             self.whereClause = value
         else:
-            if value[0] == '*' and value[-1] == '*':   #wildcards, "*", before and after
-                self.whereClause = feature + " like '%"+value[1:-1]+"%'"
-            elif value[0] == '*':                      #wildcard,  "*", before
-                self.whereClause = feature + " like '%"+value[1:]+"'"
-            elif value[-1] == '*':                     #wildcard,  "*", after
-                self.whereClause = feature + " like '"+value[:-1]+"%'"
-            else:
-                self.whereClause = feature + " = '"+value+"'"
+            # IF THERE IS A > THEN TRY TO SPLIT TO A MAX_REPEAT AND A VALUE
+            if '>' in value: # to find string before > X number times where X is the integer after >
+                self.maxRepeat = value.rsplit('>',1)[1] #rsplit allows other >s in the value
+                if is_integer(self.maxRepeat):          #if not, then this > was not intended for repeat 
+                    value = value.rsplit('>',1)[0]      #where-clause to find rows where the column 'feature' contains the string 'value' more than 'maxRepeat' times
+                    self.whereClause = "length("+feature+") - length(replace("+feature+", '"+value+"', '')) > "+str(int(self.maxRepeat)*len(value))
+            # IF NOT MANAGED TO SPLIT THEN FIRST CORRECT WILDCARDS AND THEN CREATE THE WHERE CLAUSE
+            if not is_integer(self.maxRepeat):  
+                if value[0] == '*' and value[-1] == '*':   #wildcards, "*", before and after
+                    value = "'%"+value[1:-1]+"%'"
+                elif value[0] == '*':                      #wildcard,  "*", before
+                    value = "'%"+value[1:]+"'"
+                elif value[-1] == '*':                     #wildcard,  "*", after
+                    value = "'"+value[:-1]+"%'"
+                else:
+                    value = "'"+value+"'"
+                if value[1] == '%' or value[-1] == '%':
+                    self.whereClause = feature + " like " + value   #where-clause with wildcard(s)
+                else:
+                    self.whereClause = feature + " = " + value      #where-clause without wildcard(s)     
+        self.value = value
         self.limitIsMinimumNumberCFAllowed = (limit[0] == '>') # so default and < then maximum number CF allowed 
         if limit[0] in ['<', '>']:
             limit = limit[1:]
@@ -301,6 +315,10 @@ class CriticalFeature:
             print "INPUT ERROR: 4th item of -cf must be either an integer or an integer preceded by < or >. Please see --help for more information."
             os._exit(1)
         self.limit = int(limit)
+        self.stopSession = stopSession
+        self.whereClauseDescription = self.whereClause
+        if is_integer(self.maxRepeat):
+            self.whereClauseDescription = "column "+self.feature+" in "+self.view+" contains the string "+self.value+" more than "+self.maxRepeat+" times"
         self.nbrIterations = 1
         self.interval = 0 #[s]
     def setIterations(self, iterations, interval):
@@ -310,6 +328,8 @@ class CriticalFeature:
 ######################## DEFINE FUNCTIONS ################################
 
 def is_integer(s):
+    if s == None:
+        return False
     try:
         int(s)
         return True
@@ -674,9 +694,9 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                     else: 
                         wrong_number_critical_features = (cf.limitIsMinimumNumberCFAllowed and nbrCriticalFeatures[0] < cf.limit) or (not cf.limitIsMinimumNumberCFAllowed and nbrCriticalFeatures[0] > cf.limit)
                         if cf.limitIsMinimumNumberCFAllowed:
-                            info_message = "# Critical Features = "+str(nbrCriticalFeatures[0])+" (minimum required = "+str(cf.limit)+"), Check: "+cf.whereClause+", in "+cf.view
+                            info_message = "# Critical Features = "+str(nbrCriticalFeatures[0])+" (minimum required = "+str(cf.limit)+"), Check if "+cf.whereClauseDescription
                         else:
-                            info_message = "# Critical Features = "+str(nbrCriticalFeatures[0])+" (maximum allowed = "+str(cf.limit)+"), Check: "+cf.whereClause+", in "+cf.view
+                            info_message = "# Critical Features = "+str(nbrCriticalFeatures[0])+" (maximum allowed = "+str(cf.limit)+"), Check if "+cf.whereClauseDescription
                     stop_time = datetime.now()
                     printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_critical_features)+"       , "+info_message
                     log(printout, comman, sendEmail = wrong_number_critical_features)
@@ -684,6 +704,9 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                         log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
                     if hanging or wrong_number_critical_features:
                         recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
+                        # if we want to cancel connections that are sending not allowed SQL statements do it here
+                        # if cf.cancelSessionIfCritical:
+                        #     cancel_session(cf)
         if not recorded:
             time.sleep(check_interval)
             if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
@@ -1207,9 +1230,9 @@ def main():
         chid += 1
         printout = "Feature Check "+str(chid)
         if cf.limitIsMinimumNumberCFAllowed:
-            printout += " requires at least "+str(cf.limit)+" times that "+cf.whereClause+" in "+cf.view
+            printout += " requires at least "+str(cf.limit)+" times that "+cf.whereClauseDescription
         else:
-            printout += " allows only "+str(cf.limit)+" times that "+cf.whereClause+" in "+cf.view
+            printout += " allows only "+str(cf.limit)+" times that "+cf.whereClauseDescription
         if cf.nbrIterations > 1:
             printout += " as an average from "+str(cf.nbrIterations)+" checks with "+str(cf.interval)+" seconds intervals" 
         log(printout, comman)
