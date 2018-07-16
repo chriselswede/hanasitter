@@ -1293,7 +1293,8 @@ def main():
     gstack = GStackSetting(num_gstacks, gstacks_interval)
     kprofiler = KernelProfileSetting(num_kprofs, kprofs_interval, kprofs_duration, kprofs_wait)
     try:
-        hdbcons.create_temp_output_directories() #create temporary output folders
+        if num_kprofs: #only if we write kernel profiler dumps will we need temporary output folders
+            hdbcons.create_temp_output_directories() #create temporary output folders
         while True:   
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
                 [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, comman, hdbcons)
@@ -1306,8 +1307,12 @@ def main():
                 log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman)
                 time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
     #except:           
-    except Exception as e: 
-        print e
+    except Exception as e:
+        print "HANASitter stopped with the exception: ", e
+        hdbcons.clear()    #remove temporary output folders before exit
+        sys.exit()
+    except KeyboardInterrupt:   # catching ctrl-c
+        print "HANASitter was stopped with ctrl-c"
         hdbcons.clear()    #remove temporary output folders before exit
         sys.exit()
           
