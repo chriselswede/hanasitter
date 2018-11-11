@@ -59,6 +59,9 @@ def printHelp():
     print("                                         requested then GStack 1 and RTE 1 are parallel done, when both done GStack 2 starts                        ")
     print(" -rp     recording priorities [list of 4 integers [1,4]] defines what order the recording modes will be executed for rm = 1 and rm = 2              ")
     print("                                                         # 1 = RTE, # 2 = CallStacks, # 3 = GStacks, # 4 = Kernel Profiler, default: 1,2,3,4        ")
+    print(" -hm     host mode [true/false], if true then all critical features are considered per host and the recording is done only for those hosts where    ")
+    print("                                 the critical feature is above allowed limit per host, default: false                                               ")
+    print("                                 Note: -hm is not supported for gstack (-ng), but for the other recording possibilities (-np, -nc, and -nr)         ")
     print(" -ng     number indexserver gstacks created if the DB is considered unresponsive (Note: gstack blocks the indexserver! See SAP Note 2000000         ")
     print('         "Call stack generation via gstack"), default: 0  (not used)                                                                                ') 
     print(" -ig     gstacks interval [seconds], for -rm = 1: time it waits between each gstack,                                                                ")
@@ -138,11 +141,11 @@ def printHelp():
     print("                                  -k SYSTEMKEY                                                                                                      ")
     print("                                                                                                                                                    ")
     print("CURRENT KNOWN LIMITATIONS (i.e. TODO LIST):                                                                                                         ")
-    print(" 1. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                             ")
-    print(" 2. If a CPU only happens on one Host, possible to record on only one Host - Possible to detect if a feature only happens on one Host, then record  ")
-    print("    only on that Host                                                                                                                               ")
-    print(" 3. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                          ")
-    print(" 4. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO                                         ")
+    print(" 1. It should be possible to detect if a critical feature only happens on one Host, then record only on that Host                                   ")
+    print(" 2. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                             ")
+    print(" 3. If a CPU only happens on one Host, possible to record on only one Host                                                                          ")
+    print(" 4. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                          ")
+    print(" 5. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO                                         ")
     print("                                                                                                                                                    ")
     print("AUTHOR: Christian Hansen                                                                                                                            ")
     print("                                                                                                                                                    ")
@@ -240,6 +243,7 @@ class HDBCONS:
         self.local_host = local_host
         self.local_dbinstance = local_dbinstance
         self.hosts = hosts
+        self.hostsForRecording = hosts # at first assume all, also true unloss host_mode 
         self.is_scale_out = (len(hosts) > 1)
         self.is_mdc = is_mdc
         self.is_tenant = is_tenant
@@ -264,6 +268,15 @@ class HDBCONS:
             print "ERROR, local host, ", self.local_host, ", is not part of cdtrace, ", cdtrace_path_local
             os._exit(1)
         for host in self.hosts:
+            
+            #NOt NEEDED?
+            #generic_folder_path = cdtrace_path_local.replace(self.local_host, host)+"/hanasitter_temp_out/"
+            #if os.path.isdir(generic_folder_path):
+            #    subprocess.check_output("rm -r "+generic_folder_path, shell=True)
+            #subprocess.check_output("mkdir "+generic_folder_path, shell=True)
+            #subprocess.check_output("chmod 777 "+generic_folder_path, shell=True)
+            #self.temp_host_output_dirs.append(generic_folder_path+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+"/")
+            
             self.temp_host_output_dirs.append(cdtrace_path_local.replace(self.local_host, host)+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+"/")
         for path in self.temp_host_output_dirs:
             subprocess.check_output("mkdir "+path, shell=True)
@@ -325,6 +338,10 @@ class CriticalFeature:
             self.whereClauseDescription = "column "+self.feature+" in "+self.view+" contains the string "+self.value+" more than "+self.maxRepeat+" times"
         self.nbrIterations = 1
         self.interval = 0 #[s]
+        if self.limitIsMinimumNumberCFAllowed:
+            self.cfInfo = "min required = "+str(self.limit)+", check: "+self.whereClauseDescription
+        else:
+            self.cfInfo = "max allowed = "+str(self.limit)+", check: "+self.whereClauseDescription
     def setKillSession(self, killSession):
         self.killSession = killSession
     def setIterations(self, iterations, interval):
@@ -493,7 +510,7 @@ def stop_session(cf, comman):
             subprocess.check_output(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """, shell=True)
         
 
-def feature_check(cf, nbrCriticalFeatures, critical_feature_info, comman):   # cf = critical_feature, # comman = communication manager
+def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman):   # cf = critical_feature, # comman = communication manager
     #CHECKS
     viewExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitors where view_name = '"+cf.view+"'\"", shell=True).strip(' '))
     if not viewExists:
@@ -504,28 +521,37 @@ def feature_check(cf, nbrCriticalFeatures, critical_feature_info, comman):   # c
         if not columnExists:
             log("INPUT ERROR, the view ", cf.view, " does not have the column ", cf.feature, ". Please see --help for more information.", comman)
             os._exit(1)
-    nbrCFSum = 0
+    if host_mode:
+        hostColumnExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = 'HOST'\"", shell=True).strip(' ')) 
+        if not hostColumnExists:
+            log("INPUT ERROR, you have specified host mode with -hf, but the view ", cf.view, " does not have a HOST column. Please see --help for more information.", comman)
+            os._exit(1)         
+    nbrCFSum = {}
     for iteration in range(cf.nbrIterations):
         # EXECUTE
-        command_run = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True)
+        nCFsPerHost = []
+        if host_mode:
+            hostsInView = subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select distinct HOST from SYS."+cf.view+"\"", shell=True).strip(' ').split('\n')
+            hostsInView = [h for h in hostsInView if h != ''] 
+            for host in hostsInView:
+                nCFsPerHost.append([int(subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+' and HOST = \''+host+'\'"', shell=True).split('|')[5].replace(" ", "")), host])
+        else:                
+            nCFsPerHost.append([int(subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).split('|')[5].replace(" ", "")), ''])
         # COLLECT INFO
-        if comman.log_features:
+        if comman.log_features:  #already prevented that log features (-lf) and host mode (-hm) is not used together
             critical_feature_info[0] = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select * from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True)
-        # COUNT CRITICAL FEATURES
-        nbrCFs = -1
-        try: 
-            nbrCFs = int(command_run.split('|')[5].replace(" ", ""))
-        except:
-            log("ERROR, a table was not retrieved. command_run = \n", command_run, "\tPOSSIBLE CONNECTION ERROR: Please check that the key is maintained in hdbuserstore", comman)
-            os._exit(1)
-        if nbrCFs < 0:
-            log("ERROR, something went wrong. command_run = \n", command_run, "\tPOSSIBLE CONNECTION ERROR: Please check that the key is maintained in hdbuserstore", comman)
-            os._exit(1)
-        nbrCFSum += nbrCFs
+        for cfHost in nCFsPerHost:
+            if cfHost[1] in nbrCFSum:
+                nbrCFSum[cfHost[1]] += cfHost[0]
+            else:
+                nbrCFSum[cfHost[1]] = cfHost[0]
         # CRITICAL FEATURE CHECK INTERVALL
         time.sleep(float(cf.interval))       
     # GET AVERAGE
-    nbrCriticalFeatures[0] = int( float(nbrCFSum) / float(cf.nbrIterations) )
+    for h, nCF in nbrCFSum.items():
+        nbrCFSum[h] = int ( float(nCF) / float(cf.nbrIterations) )
+    nbrCFsPerHost[0] = nbrCFSum  #output 
+
  
 def record_gstack(gstacks_interval, comman):
     pid = subprocess.check_output("pgrep hdbindexserver", shell=True).strip("\n").strip(" ")
@@ -542,25 +568,26 @@ def record_kprof(kprofiler, hdbcons, comman):   # SAP Note 1804811
     out_dir = comman.out_dir.replace(".","_")+"/"
     total_printout = ""
     for hdbcon_string, host, tmp_dir in zip(hdbcons.hdbcons_strings, hdbcons.hosts, hdbcons.temp_host_output_dirs): 
-        tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
-        filename_cpu = ("kernel_profiler_cpu_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
-        filename_wait = ("kernel_profiler_wait_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
-        filename_kprof_log = ("kernel_profiler_output_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".log")
-        start_time = datetime.now()
-        os.system(hdbcon_string+'profiler clear" > '+out_dir+filename_kprof_log)
-        os.system(hdbcon_string+'profiler start -w '+str(kprofiler.kprofs_wait)+'" > '+out_dir+filename_kprof_log)
-        time.sleep(kprofiler.kprofs_duration) 
-        os.system(hdbcon_string+'profiler stop" > '+out_dir+filename_kprof_log)    
-        os.system(hdbcon_string+'profiler print -o '+tmp_dir+filename_cpu+','+tmp_dir+filename_wait+'" > '+out_dir+filename_kprof_log)
-        stop_time = datetime.now()
-        if "[ERROR]" in open(out_dir+filename_kprof_log).read():
-            printout = "Kernel Profiler   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , False        ,   None     , "+out_dir+filename_kprof_log
-        else:
-            os.system("mv "+tmp_dir+filename_cpu+" "+out_dir+filename_cpu)
-            os.system("mv "+tmp_dir+filename_wait+" "+out_dir+filename_wait)
-            printout = "Kernel Profiler   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+out_dir+filename_cpu+" and "+out_dir+filename_wait
-        log(printout, comman)
-        total_printout += printout
+        if host in hdbcons.hostsForRecording:
+            tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
+            filename_cpu = ("kernel_profiler_cpu_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
+            filename_wait = ("kernel_profiler_wait_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
+            filename_kprof_log = ("kernel_profiler_output_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".log")
+            start_time = datetime.now()
+            os.system(hdbcon_string+'profiler clear" > '+out_dir+filename_kprof_log)
+            os.system(hdbcon_string+'profiler start -w '+str(kprofiler.kprofs_wait)+'" > '+out_dir+filename_kprof_log)
+            time.sleep(kprofiler.kprofs_duration) 
+            os.system(hdbcon_string+'profiler stop" > '+out_dir+filename_kprof_log)    
+            os.system(hdbcon_string+'profiler print -o '+tmp_dir+filename_cpu+','+tmp_dir+filename_wait+'" > '+out_dir+filename_kprof_log)
+            stop_time = datetime.now()
+            if "[ERROR]" in open(out_dir+filename_kprof_log).read():
+                printout = "Kernel Profiler   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , False        ,   None     , "+out_dir+filename_kprof_log
+            else:
+                os.system("mv "+tmp_dir+filename_cpu+" "+out_dir+filename_cpu)
+                os.system("mv "+tmp_dir+filename_wait+" "+out_dir+filename_wait)
+                printout = "Kernel Profiler   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+out_dir+filename_cpu+" and "+out_dir+filename_wait
+            log(printout, comman)
+            total_printout += printout
     time.sleep(kprofiler.kprofs_interval)
     return total_printout  
  
@@ -568,38 +595,40 @@ def record_kprof(kprofiler, hdbcons, comman):   # SAP Note 1804811
 def record_callstack(callstacks_interval, hdbcons, comman):
     total_printout = ""
     for hdbcon_string, host in zip(hdbcons.hdbcons_strings, hdbcons.hosts):
-        tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
-        filename = (comman.out_dir.replace(".","_")+"/callstack_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
-        start_time = datetime.now()
-        os.system(hdbcon_string+'context list -s" > '+filename)
-        stop_time = datetime.now()
-        printout = "Call Stack Record , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          ,   -        , "+filename 
-        log(printout, comman)
-        total_printout += printout
+        if host in hdbcons.hostsForRecording:
+            tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
+            filename = (comman.out_dir.replace(".","_")+"/callstack_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
+            start_time = datetime.now()
+            os.system(hdbcon_string+'context list -s" > '+filename)
+            stop_time = datetime.now()
+            printout = "Call Stack Record , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          ,   -        , "+filename 
+            log(printout, comman)
+            total_printout += printout
     time.sleep(callstacks_interval)
     return total_printout 
  
 def record_rtedump(rtedumps_interval, hdbcons, comman):
     total_printout = ""
     for hdbcon_string, host in zip(hdbcons.hdbcons_strings, hdbcons.hosts):
-        tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
-        start_time = datetime.now()
-        if hdbcons.rte_mode == 0: # normal rte dump
-            filename = (comman.out_dir.replace(".","_")+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
-            os.system(hdbcon_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
-        elif hdbcons.rte_mode == 1: # light rte dump 
-            filename = (comman.out_dir.replace(".","_")+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
-            os.system(hdbcon_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
-            os.system(hdbcon_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
-            os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
-            os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEXWAITING" >> '+filename)
-            os.system(hdbcon_string+'statreg print -h -n M_DEV_CONTEXTS" >> '+filename)
-            os.system(hdbcon_string+'statreg print -h -n M_CONNECTIONS" >> '+filename)
-            os.system(hdbcon_string+'statreg print -h -n M_DEV_SESSION_PARTITIONS" >> '+filename)
-        stop_time = datetime.now()
-        printout = "RTE Dump Record   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+filename   # if an [ERROR] happens that will be inside the file, hanasitter will not know it
-        log(printout, comman)
-        total_printout += printout
+        if host in hdbcons.hostsForRecording:
+            tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
+            start_time = datetime.now()
+            if hdbcons.rte_mode == 0: # normal rte dump
+                filename = (comman.out_dir.replace(".","_")+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                os.system(hdbcon_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
+            elif hdbcons.rte_mode == 1: # light rte dump 
+                filename = (comman.out_dir.replace(".","_")+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                os.system(hdbcon_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
+                os.system(hdbcon_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
+                os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
+                os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEXWAITING" >> '+filename)
+                os.system(hdbcon_string+'statreg print -h -n M_DEV_CONTEXTS" >> '+filename)
+                os.system(hdbcon_string+'statreg print -h -n M_CONNECTIONS" >> '+filename)
+                os.system(hdbcon_string+'statreg print -h -n M_DEV_SESSION_PARTITIONS" >> '+filename)
+            stop_time = datetime.now()
+            printout = "RTE Dump Record   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+filename   # if an [ERROR] happens that will be inside the file, hanasitter will not know it
+            log(printout, comman)
+            total_printout += printout
     time.sleep(rtedumps_interval)
     return total_printout 
  
@@ -672,7 +701,7 @@ def parallel_recording(record_type, recorder, hdbcons, comman):
     else:
         return record_kprof(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features))
 
-def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, comman, hdbcons):   
+def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons):   
     recorded = False
     offline = False
     while not recorded:
@@ -700,30 +729,35 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
             chid = 0
             for cf in critical_features:
                 if not recorded:    #No hang situation or critical feature situation happened yet, so check for a critical feature
-                    nbrCriticalFeatures = [-1]
+                    nbrCFsPerHost = [-1]
                     critical_feature_info = [""]
+                    hostsWithWrongNbrCFs = []
                     chid += 1
                     start_time = datetime.now()
-                    t = Timer(0.1,feature_check,[cf, nbrCriticalFeatures, critical_feature_info, comman])
+                    t = Timer(0.1,feature_check,[cf, nbrCFsPerHost, critical_feature_info, host_mode, comman])
                     t.start()
                     t.join((feature_check_timeout + cf.interval)*cf.nbrIterations)
+                    stop_time = datetime.now()
                     hanging = t.is_alive()
                     if hanging:
                         info_message = "Hang situation during feature-check detected"
+                        printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not hanging)+"       , "+info_message
+                        log(printout, comman, sendEmail = hanging)
                     else: 
-                        wrong_number_critical_features = (cf.limitIsMinimumNumberCFAllowed and nbrCriticalFeatures[0] < cf.limit) or (not cf.limitIsMinimumNumberCFAllowed and nbrCriticalFeatures[0] > cf.limit)
-                        if cf.limitIsMinimumNumberCFAllowed:
-                            info_message = "# Critical Features = "+str(nbrCriticalFeatures[0])+" (minimum required = "+str(cf.limit)+"), Check if "+cf.whereClauseDescription
-                        else:
-                            info_message = "# Critical Features = "+str(nbrCriticalFeatures[0])+" (maximum allowed = "+str(cf.limit)+"), Check if "+cf.whereClauseDescription
-                    stop_time = datetime.now()
-                    printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_critical_features)+"       , "+info_message
-                    log(printout, comman, sendEmail = wrong_number_critical_features)
+                        for host, nCFs  in nbrCFsPerHost[0].items():
+                            wrong_number_critical_features = (cf.limitIsMinimumNumberCFAllowed and nCFs < cf.limit) or (not cf.limitIsMinimumNumberCFAllowed and nCFs > cf.limit)    
+                            info_message = "# CFs = "+str(nCFs)+" for "+host+", "+cf.cfInfo
+                            printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_critical_features)+"       , "+info_message
+                            log(printout, comman, sendEmail = wrong_number_critical_features)
+                            if wrong_number_critical_features:
+                                hostsWithWrongNbrCFs.append(host)
                     if comman.log_features:
                         log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
-                    if hanging or wrong_number_critical_features:
+                    if hanging or len(hostsWithWrongNbrCFs):
                         if cf.killSession:
                             stop_session(cf, comman)
+                        if host_mode:
+                            hdbcons.hostsForRecording = hostsWithWrongNbrCFs
                         recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
         if not recorded:
             time.sleep(check_interval)
@@ -771,6 +805,7 @@ def main():
     check_interval = 60 #seconds
     recording_mode = 1 # either 1, 2 or 3
     recording_prio = ['1', '2', '3', '4']   # 1=RTE, 2=CallStacks, 3=GStacks, 4=Kernel Profiler
+    host_mode = "false"
     num_rtedumps = 0 #how many rtedumps?
     rtedumps_interval = 60 #seconds
     rte_mode = 0 # either 0 or 1 
@@ -842,6 +877,8 @@ def main():
                         recording_mode = flagValue
                     if firstWord == '-rp': 
                         recording_prio = [x for x in flagValue.split(',')]
+                    if firstWord == '-hm': 
+                        host_mode = flagValue
                     if firstWord == '-nr': 
                         num_rtedumps = flagValue
                     if firstWord == '-ir': 
@@ -904,6 +941,8 @@ def main():
         recording_mode = sys.argv[sys.argv.index('-rm') + 1]
     if '-rp' in sys.argv:
         recording_prio = [x for x in sys.argv[  sys.argv.index('-rp') + 1   ].split(',')]
+    if '-hm' in sys.argv:
+        host_mode = sys.argv[sys.argv.index('-hm') + 1]
     if '-nr' in sys.argv:
         num_rtedumps = sys.argv[sys.argv.index('-nr') + 1]
     if '-ir' in sys.argv:
@@ -1090,6 +1129,17 @@ def main():
     if [rec for rec in recording_prio if recording_prio.count(rec) > 1]:
         print "INPUT ERROR: The -rp flag must not contain dublicates. Please see --help for more information."
         os._exit(1)  
+    ### host_mode, -hm
+    host_mode = checkAndConvertBooleanFlag(host_mode, "-hm")
+    if host_mode and not (len(hosts_worker_and_standby) > 1):
+        log("INPUT ERROR: -hm is True even though this is not a scale-out. This does not make sense. Please see --help for more information.", comman)
+        os._exit(1) 
+    if host_mode and log_features:
+        log("INPUT ERROR, it is not supported to log features (-lf) if host mode (-hm) is used. Please see --help for more information.", comman)
+        os._exit(1)    
+    if host_mode and num_gstacks:
+        log("INPUT ERROR, gstack recording (-ng) is not supported in host mode (-hm). Please see --help for more information.", comman)
+        os._exit(1)   
     ### num_rtedumps, -nr
     if not is_integer(num_rtedumps):
         log("INPUT ERROR: -nr must be an integer. Please see --help for more information.", comman)
@@ -1257,6 +1307,8 @@ def main():
     log("Online, Primary and Not-Secondary Check: Interval = "+str(online_test_interval)+" seconds", comman)
     log("Ping Check: Interval = "+str(check_interval)+" seconds, Timeout = "+str(ping_timeout)+" seconds", comman)
     log("Feature Checks: Interval "+str(check_interval)+" seconds, Timeout = "+str(feature_check_timeout)+" seconds", comman)
+    if host_mode:
+        log("Host Mode: Yes, i.e. all critical features below is PER HOST, and recording is done only for those hosts where a critical feature was found crossing allowed limit", comman)
     chid = 0
     for cf in critical_features:
         chid += 1
@@ -1287,6 +1339,7 @@ def main():
         log("After Recording: Exit", comman)
     else:
         log("After Recording: Sleep "+str(after_recorded)+" seconds", comman)
+    log(" - - - - - Start HANASitter - - - - - - ", comman)
     log("Action            , Timestamp              , Duration         , Successful   , Result     , Comment ", comman)
     rte = RTESetting(num_rtedumps, rtedumps_interval)
     callstack = CallStackSetting(num_callstacks, callstacks_interval)
@@ -1295,9 +1348,9 @@ def main():
     try:
         if num_kprofs: #only if we write kernel profiler dumps will we need temporary output folders
             hdbcons.create_temp_output_directories() #create temporary output folders
-        while True:   
+        while True: 
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
-                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, comman, hdbcons)
+                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons)
                 if recorded:
                     if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
                         hdbcons.clear()    #remove temporary output folders before exit
