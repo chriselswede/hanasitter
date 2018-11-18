@@ -141,11 +141,10 @@ def printHelp():
     print("                                  -k SYSTEMKEY                                                                                                      ")
     print("                                                                                                                                                    ")
     print("CURRENT KNOWN LIMITATIONS (i.e. TODO LIST):                                                                                                         ")
-    print(" 1. It should be possible to detect if a critical feature only happens on one Host, then record only on that Host                                   ")
-    print(" 2. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                             ")
-    print(" 3. If a CPU only happens on one Host, possible to record on only one Host                                                                          ")
-    print(" 4. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                          ")
-    print(" 5. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO                                         ")
+    print(" 1. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                             ")
+    print(" 2. If a CPU only happens on one Host, possible to record on only one Host                                                                          ")
+    print(" 3. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                          ")
+    print(" 4. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO                                         ")
     print("                                                                                                                                                    ")
     print("AUTHOR: Christian Hansen                                                                                                                            ")
     print("                                                                                                                                                    ")
@@ -1004,12 +1003,16 @@ def main():
         os._exit(1)
     ENV = key_environment.split('\n')[1].replace('  ENV : ','').split(',')
     key_hosts = [env.split(':')[0] for env in ENV] 
-    if not local_host in key_hosts:
-        print "ERROR, local host, ", local_host, ", should be one of the hosts specified for the key, ", dbuserkey, " (in case of virtual, please use -vlh, see --help for more info)"
+    if not local_host in key_hosts and not 'localhost' in key_hosts:
+        print "ERROR, local host, ", local_host, ", should be one of the hosts specified for the key, ", dbuserkey, ", in case of virtual use -vlh."
         os._exit(1)
-    local_host_index = key_hosts.index(local_host)
-    key_sqlports = [env.split(':')[1] for env in ENV]
-    local_sqlport = key_sqlports[local_host_index]         
+    elif not local_host in key_hosts and 'localhost' in key_hosts:
+        local_host_index = 0
+    else:
+        local_host_index = key_hosts.index(local_host)       
+        
+    key_sqlports = [env.split(':')[1] for env in ENV]    
+    local_sqlport = key_sqlports[local_host_index]             
     dbinstances = [port[1:3] for port in key_sqlports]
     if not all(x == dbinstances[0] for x in dbinstances):
         print "ERROR: The hosts provided with the user key, "+dbuserkey+", does not all have the same instance number"
@@ -1055,7 +1058,7 @@ def main():
     hosts_worker_and_standby = subprocess.check_output('sapcontrol -nr '+local_dbinstance+' -function GetSystemInstanceList', shell=True).splitlines(1)
     hosts_worker_and_standby = [line.split(',')[0] for line in hosts_worker_and_standby if ("HDB" in line or "HDB|HDB_WORKER" in line or "HDB|HDB_STANDBY" in line)] #Should we add HDB|HDB_XS_WORKER also?
     for aHost in key_hosts:  #Check that hosts provided in hdbuserstore are correct
-        if not aHost in hosts_worker_and_standby:
+        if not aHost in hosts_worker_and_standby and not aHost in ['localhost']:
             print "ERROR: The host, "+aHost+", provided with the user key, "+dbuserkey+", is not one of the worker or standby hosts: ", hosts_worker_and_standby
             os._exit(1)
             
