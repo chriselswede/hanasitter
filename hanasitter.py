@@ -555,7 +555,7 @@ def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman): 
 def record_gstack(gstacks_interval, comman):
     pid = subprocess.check_output("pgrep hdbindexserver", shell=True).strip("\n").strip(" ")
     start_time = datetime.now()
-    filename = (comman.out_dir.replace(".","_")+"/gstack_"+pid+"_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
+    filename = (comman.out_dir+"/gstack_"+pid+"_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
     os.system('gstack '+pid+' > '+filename)
     stop_time = datetime.now()
     printout = "GStack Record     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          ,   -        , "+filename 
@@ -564,7 +564,7 @@ def record_gstack(gstacks_interval, comman):
     return printout
  
 def record_kprof(kprofiler, hdbcons, comman):   # SAP Note 1804811
-    out_dir = comman.out_dir.replace(".","_")+"/"
+    out_dir = comman.out_dir+"/"
     total_printout = ""
     for hdbcon_string, host, tmp_dir in zip(hdbcons.hdbcons_strings, hdbcons.hosts, hdbcons.temp_host_output_dirs): 
         if host in hdbcons.hostsForRecording:
@@ -596,7 +596,7 @@ def record_callstack(callstacks_interval, hdbcons, comman):
     for hdbcon_string, host in zip(hdbcons.hdbcons_strings, hdbcons.hosts):
         if host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
-            filename = (comman.out_dir.replace(".","_")+"/callstack_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
+            filename = (comman.out_dir+"/callstack_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
             start_time = datetime.now()
             os.system(hdbcon_string+'context list -s" > '+filename)
             stop_time = datetime.now()
@@ -613,10 +613,10 @@ def record_rtedump(rtedumps_interval, hdbcons, comman):
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
             start_time = datetime.now()
             if hdbcons.rte_mode == 0: # normal rte dump
-                filename = (comman.out_dir.replace(".","_")+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
                 os.system(hdbcon_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
             elif hdbcons.rte_mode == 1: # light rte dump 
-                filename = (comman.out_dir.replace(".","_")+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
                 os.system(hdbcon_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
                 os.system(hdbcon_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
                 os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
@@ -1069,7 +1069,7 @@ def main():
             used_hosts.append(potential_host)
 
     ############# OUTPUT DIRECTORY #########
-    out_dir = out_dir.replace(" ","_").replace(".","_")
+    out_dir = out_dir.replace(" ","_")
     if out_dir and not os.path.exists(out_dir):
         os.makedirs(out_dir)
  
