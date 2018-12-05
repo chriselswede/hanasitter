@@ -42,6 +42,7 @@ def printHelp():
     print('            "<m_view 1>,WHERE,<where clause 1>,<limit 1>,...,<m_view N>,WHERE,<where clause N>,<limit N>"                                           ')
     print('         default: ""                                                                                                                                ')
     print('         Note: <limit> should be an integer, or an integer preceded by < (for maximum allowed) or > (for minumum allowed)                           ')
+    print('         Note: If you need a , in critical feature, please use \c instead, e.g. add_seconds(BLOCKED_TIME\c600)                                      ')
     print(" -if     number checks and intervals of checks, every odd item of this list specifies how many times each feature check (see -cf) should be executed")
     print("         and every even item specifies how many seconds it waits between each check, then the <max numbers X> in the -cf flag is the maximum        ")
     print("         allowed average value, e.g. <number checks 1>,<interval [s] 1>,...,<number checks N>,<interval [s] N>, default: [] (not used)              ")
@@ -301,7 +302,7 @@ class CriticalFeature:
         self.maxRepeat = None
         self.whereMode = (self.feature == 'WHERE')
         if self.whereMode:
-            self.whereClause = value
+            self.whereClause = value.replace('\c',',')  # in case , wants to be used in where clause, e.g. CURRENT_TIMESTAMP>=add_seconds(BLOCKED_TIME,600)
         else:
             # IF THERE IS A > THEN TRY TO SPLIT TO A MAX_REPEAT AND A VALUE
             if '>' in value: # to find string before > X number times where X is the integer after >
