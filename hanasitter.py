@@ -114,8 +114,8 @@ def printHelp():
     print("         then record two call stacks)                                                                                                               ")    
     print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_STATE,Running,30,M_CS_UNLOADS,TABLE_NAME,VARINUM,1" -if 3,5,1,0 -nc 2                        ')
     print("                                                                                                                                                    ")
-    print("EXAMPLE (Here a where clause is given)                                                                                                              ")    
-    print('''  > python hanasitter.py -cf "M_SERVICE_THREADS,WHERE,IS_ACTIVE='TRUE' and SERVICE_NAME='indexserver' and DURATION>420000000,1" -nc 2           ''')
+    print("EXAMPLE (Here a where clause is given, if more than 3 active indexserver threads runs longer than about 5 days (duration is in ms))                 ")    
+    print('''  > python hanasitter.py -cf "M_SERVICE_THREADS,WHERE,IS_ACTIVE='TRUE' and SERVICE_NAME='indexserver' and DURATION>420000000,3" -nc 2           ''')
     print("                                                                                                                                                    ")
     print("EXAMPLE (if average system CPU >95% or Ping > 30 seconds, 2 Call Stacks are recorded, or else it will try again after 120 seconds, after            ")
     print("         recording it will sleep for one hour before it starts to track again):                                                                     ")                                                
@@ -146,6 +146,8 @@ def printHelp():
     print(" 2. If a CPU only happens on one Host, possible to record on only one Host                                                                          ")
     print(" 3. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                          ")
     print(" 4. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO                                         ")
+    print(" 5. Read config file, -ff, after hanasitter slept, so that it will allow dynamic changes                                                            ")
+    print(" 6. Make the PING check specific for HOSTS (and only record for that host) ... can be done with ROUTE_TO(<volume_id_1>, ..., <volume_id_n>)         ")
     print("                                                                                                                                                    ")
     print("AUTHOR: Christian Hansen                                                                                                                            ")
     print("                                                                                                                                                    ")
@@ -197,14 +199,14 @@ class KernelProfileSetting:
         self.kprofs_wait = kprofs_wait
 
 class EmailNotification:
-    def __init__(self, senderEmail, recieverEmail, mailServer):
+    def __init__(self, senderEmail, recieverEmail, mailServer, SID):
         self.senderEmail = senderEmail
         #self.senderPassword = senderPassword
         self.recieverEmail = recieverEmail
         self.mailServer = mailServer
         #self.mailServerPort = mailServerPort
         #self.timeout = timeout
-        #self.SID = SID
+        self.SID = SID
     def printEmailNotification(self):
         print "Sender Email: ", self.senderEmail, " Reciever Email: ", self.recieverEmail, " Mail Server: ", self.mailServer 
 
@@ -714,12 +716,12 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
             [hanging, offline] = hana_ping(ping_timeout, comman)
             stop_time = datetime.now()
             if offline:            
-                comment = "DB is offline, will exit the tracker"
+                comment = "DB is offline, will exit the tracker without recording (if DB is online, check that the key can be used with hdbsql)"
             elif hanging:
                 comment = "No response from DB within "+str(ping_timeout)+" seconds"
             else:
                 comment = "DB responded faster than "+str(ping_timeout)+" seconds"
-            log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = not hanging and not offline) 
+            log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
             if hanging:
                 recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
             if offline:
@@ -1287,7 +1289,7 @@ def main():
     ############# EMAIL NOTIFICATION ##############
     if email_notification:
         global emailNotification
-        emailNotification = EmailNotification(email_notification[0], email_notification[1], email_notification[2])
+        emailNotification = EmailNotification(email_notification[0], email_notification[1], email_notification[2], SID)
 
     ### FILL HDBCONS STRINGS ###
     hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName)
