@@ -145,7 +145,7 @@ def printHelp():
     print(" 1. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                             ")
     print(" 2. If a CPU only happens on one Host, possible to record on only one Host                                                                          ")
     print(" 3. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                          ")
-    print(" 4. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO                                         ")
+    print(" 4. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO  (but can be done with cron, see slides)")
     print(" 5. Read config file, -ff, after hanasitter slept, so that it will allow dynamic changes                                                            ")
     print(" 6. Make the PING check specific for HOSTS (and only record for that host) ... can be done with ROUTE_TO(<volume_id_1>, ..., <volume_id_n>)         ")
     print("                                                                                                                                                    ")
@@ -1007,8 +1007,13 @@ def main():
     ENV = key_environment.split('\n')[1].replace('  ENV : ','').split(',')
     key_hosts = [env.split(':')[0] for env in ENV] 
     if not local_host in key_hosts and not 'localhost' in key_hosts:
-        print "ERROR, local host, ", local_host, ", should be one of the hosts specified for the key, ", dbuserkey, ", in case of virtual use -vlh."
-        os._exit(1)
+        #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
+        #possible future masters in the hdbuserstore:   virt1:30413,virt3:30413,virt4:30413, so he executed HANASitter on virt2 with  -vlh virt2  --> worked fine
+        #print "ERROR, local host, ", local_host, ", should be one of the hosts specified for the key, ", dbuserkey, ", in case of virtual use -vlh."
+        #os._exit(1)
+        #Instead of Error, just do Warning (consider to remove Warning...)
+        print "WARNING, local host, ", local_host, ", should be one of the hosts specified for the key. It is not, so will assume the SQL port of the first one. Continue on own risk!"
+        local_host_index = 0
     elif not local_host in key_hosts and 'localhost' in key_hosts:
         local_host_index = 0
     else:
