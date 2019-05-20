@@ -465,6 +465,7 @@ def tenant_names_and_ports(daemon_file):
     ports_second_halfs = []
     foundNewName = False
     foundFirstPortHalf = False
+    foundInstanceIds = False
     with open(daemon_file) as f:
         for line in f:
             if not foundNewName and "[indexserver." in line:
@@ -473,10 +474,17 @@ def tenant_names_and_ports(daemon_file):
             elif foundNewName and not foundFirstPortHalf and "arguments = -port " in line:
                 ports_first_halfs.append(line.strip("arguments = -port ").split("$")[0])
                 foundFirstPortHalf = True
-            elif foundNewName and foundFirstPortHalf and "instanceids = " in line:
+            elif foundNewName and not foundInstanceIds and "instanceids = " in line:
                 ports_second_halfs.append(line.strip("instanceids = ").strip("\n"))
-                foundNewName = False
-                foundFirstPortHalf = False
+                foundInstanceIds = True
+            elif foundNewName and not line:  # the order of instance ids and arguments are different in SPS03 and SPS04
+                if foundFirstPortHalf and foundInstanceIds:
+                    foundNewName = False
+                    foundFirstPortHalf = False
+                    foundInstanceIds = False
+                else:
+                    print "ERROR, something went wrong while reading the daemon.ini file"
+                    os._exit(1)
         tenantIndexserverPorts = [first+second for first, second in zip(ports_first_halfs, ports_second_halfs)]
     return [tenantDBNames, tenantIndexserverPorts]
 
