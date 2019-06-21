@@ -1151,8 +1151,9 @@ def main():
     ### host_mode, -hm
     host_mode = checkAndConvertBooleanFlag(host_mode, "-hm")
     if host_mode and not (len(hosts_worker_and_standby) > 1):
-        log("INPUT ERROR: -hm is True even though this is not a scale-out. This does not make sense. Please see --help for more information.", comman)
-        os._exit(1) 
+        log("WARNING: INPUT ERROR: -hm is True even though this is not a scale-out. This does not make sense. Please see --help for more information.", comman)
+        log("Will now change -hm to False", comman)
+        host_mode = False
     if host_mode and log_features:
         log("INPUT ERROR, it is not supported to log features (-lf) if host mode (-hm) is used. Please see --help for more information.", comman)
         os._exit(1)    
