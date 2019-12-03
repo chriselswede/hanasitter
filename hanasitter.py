@@ -90,9 +90,11 @@ def printHelp():
     print("         features could indicate that the sessions (connections) are tried to be disconnected or not, default: None (not used)                      ")
     print("         Note: Requires SESSION ADMIN                                                                                                               ")
     print("         *** ADMINS (Output Directory, Logging, Output and DB User) ***                                                                             ")
-    print(" -od     output directory, full path of the folder where all output files will end up (if the folder does not exist it will be created),            ")
-    print("         default: '/tmp/hanasitter_output'                                                                                                          ")
-    print(" -or     output log retention days, hanasitterlogs in the path specified with -od are only saved for this number of days, default: -1 (not used)    ")
+    print(" -od     output directory, full path of the folder where output files will end up (if the folder does not exist it will be created),                ")
+    print("         default: '/tmp/hanasitter_output'   (i.e. same as for -ol)                                                                                 ")
+    print(" -ol     log output directory, full path of the folder where HANASitter log files will end up (if the folder does not exist it will be created),    ")
+    print("         default: '/tmp/hanasitter_output'   (i.e. same as for -od)                                                                                 ")
+    print(" -or     output log retention days, hanasitterlogs in the path specified with -ol are only saved for this number of days, default: -1 (not used)    ")
     print(" -en     email notification, <sender's email>,<reciever's email>,<mail server>, default:     (not used)                                             ") 
     print("                             example: me@ourcompany.com,you@ourcompany.com,smtp.intra.ourcompany.com                                                ")
     print('         NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  ')
@@ -290,9 +292,10 @@ class HDBCONS:
 
         
 class CommunicationManager:
-    def __init__(self, dbuserkey, out_dir, std_out, hdbsql_string, log_features):
+    def __init__(self, dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features):
         self.dbuserkey = dbuserkey
         self.out_dir = out_dir
+        self.log_dir = log_dir
         self.std_out = std_out
         self.hdbsql_string = hdbsql_string
         self.log_features = log_features     
@@ -452,7 +455,7 @@ def file_lines_with_word(file_name, word):
     return lines 
 
 def clean_logs(minRetainedLogDays, comman):
-    path = comman.out_dir
+    path = comman.log_dir
     nFilesBefore = len([name for name in os.listdir(path) if "hanasitterlog" in name])
     subprocess.check_output("find "+path+"/hanasitterlog* -mtime +"+str(minRetainedLogDays)+" -delete", shell=True)
     nFilesAfter = len([name for name in os.listdir(path) if "hanasitterlog" in name])
@@ -524,17 +527,17 @@ def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman): 
     #CHECKS
     viewExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitors where view_name = '"+cf.view+"'\"", shell=True).strip(' '))
     if not viewExists:
-        log("INPUT ERROR, the view given as first entry in the -cf flag, ", cf.view, ", does not exist. Please see --help for more information.", comman)
+        log("INPUT ERROR, the view given as first entry in the -cf flag, "+cf.view+", does not exist. Please see --help for more information.", comman)
         os._exit(1)
     if not cf.whereMode:
         columnExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = '"+cf.feature+"'\"", shell=True).strip(' ')) 
         if not columnExists:
-            log("INPUT ERROR, the view ", cf.view, " does not have the column ", cf.feature, ". Please see --help for more information.", comman)
+            log("INPUT ERROR, the view "+cf.view+" does not have the column "+cf.feature+". Please see --help for more information.", comman)
             os._exit(1)
     if host_mode:
         hostColumnExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = 'HOST'\"", shell=True).strip(' ')) 
         if not hostColumnExists:
-            log("INPUT ERROR, you have specified host mode with -hf, but the view ", cf.view, " does not have a HOST column. Please see --help for more information.", comman)
+            log("INPUT ERROR, you have specified host mode with -hf, but the view "+cf.view+" does not have a HOST column. Please see --help for more information.", comman)
             os._exit(1)         
     nbrCFSum = {}
     for iteration in range(cf.nbrIterations):
@@ -703,13 +706,13 @@ def parallel_recording_wrapper(rec_types):
 
 def parallel_recording(record_type, recorder, hdbcons, comman):
     if record_type == 1:
-        return record_rtedump(recorder.rtedumps_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_rtedump(recorder.rtedumps_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
     elif record_type == 2:
-        return record_callstack(recorder.callstacks_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_callstack(recorder.callstacks_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
     elif record_type == 3:
-        return record_gstack(recorder.gstacks_interval, CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_gstack(recorder.gstacks_interval, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
     else:
-        return record_kprof(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_kprof(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
 
 def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons):   
     recorded = False
@@ -762,7 +765,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                             if wrong_number_critical_features:
                                 hostsWithWrongNbrCFs.append(host)
                     if comman.log_features:
-                        log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
+                        log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
                     if hanging or len(hostsWithWrongNbrCFs):
                         if cf.killSession:
                             stop_session(cf, comman)
@@ -792,7 +795,7 @@ def log(message, comman, file_name = "", sendEmail = False):
         print message
     if file_name == "":
         file_name = "hanasitterlog"
-    logfile = open(comman.out_dir+"/"+file_name+"_"+datetime.now().strftime("%Y-%m-%d"+".txt").replace(" ", "_"), "a")
+    logfile = open(comman.log_dir+"/"+file_name+"_"+datetime.now().strftime("%Y-%m-%d"+".txt").replace(" ", "_"), "a")
     logfile.write(message+"\n")   
     logfile.flush()
     logfile.close()
@@ -835,6 +838,7 @@ def main():
     after_recorded = -1 #default: exits after recorded
     std_out = "true" #print to std out
     out_dir = "/tmp/hanasitter_output"
+    log_dir = "/tmp/hanasitter_output"
     minRetainedLogDays = -1 #automatic cleanup of hanasitterlog
     flag_file = ""    #default: no configuration input file
     log_features = "false"
@@ -923,6 +927,8 @@ def main():
                         after_recorded = flagValue
                     if firstWord == '-od': 
                         out_dir = flagValue
+                    if firstWord == '-ol': 
+                        log_dir = flagValue
                     if firstWord == '-or':
                         minRetainedLogDays = flagValue
                     if firstWord == '-lf': 
@@ -989,6 +995,8 @@ def main():
         after_recorded = sys.argv[sys.argv.index('-ar') + 1]
     if '-od' in sys.argv:
         out_dir = sys.argv[sys.argv.index('-od') + 1]
+    if '-ol' in sys.argv:
+        log_dir = sys.argv[sys.argv.index('-ol') + 1]
     if '-or' in sys.argv:
         minRetainedLogDays = sys.argv[sys.argv.index('-or') + 1]
     if '-lf' in sys.argv:
@@ -1031,8 +1039,10 @@ def main():
     local_sqlport = key_sqlports[local_host_index]             
     dbinstances = [port[1:3] for port in key_sqlports]
     if not all(x == dbinstances[0] for x in dbinstances):
-        print "ERROR: The hosts provided with the user key, "+dbuserkey+", does not all have the same instance number"
-        os._exit(1)
+        #TEMP
+        #print "ERROR: The hosts provided with the user key, "+dbuserkey+", do not all have the same instance number"
+        print "WARNING: The hosts provided with the user key, "+dbuserkey+", do not all have the same instance number. They should. Continue on your own risk!"
+        #os._exit(1)
     local_dbinstance = dbinstances[local_host_index]
     SID = subprocess.check_output('whoami', shell=True).replace('\n','').replace('adm','').upper()
     
@@ -1084,13 +1094,16 @@ def main():
         if '@'+communicationPort in subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+potential_host+'/lock', shell=True):
             used_hosts.append(potential_host)
 
-    ############# OUTPUT DIRECTORY #########
+    ############# OUTPUT DIRECTORIES #########
     out_dir = out_dir.replace(" ","_")
     if out_dir and not os.path.exists(out_dir):
         os.makedirs(out_dir)
+    log_dir = log_dir.replace(" ","_")
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir)
  
     ############ CHECK AND CONVERT INPUT PARAMETERS FOR COMMUNICATION MANAGER ################     
-    log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with \n"+" ".join(sys.argv)+"\nas "+dbuserkey+": "+key_environment, CommunicationManager(dbuserkey, out_dir, True, "", False))  
+    log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with \n"+" ".join(sys.argv)+"\nas "+dbuserkey+": "+key_environment, CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))  
     ### std_out, -so
     std_out = checkAndConvertBooleanFlag(std_out, "-so")
     ### ssl, -ssl
@@ -1101,11 +1114,11 @@ def main():
     ### log_features, -lf
     log_features = checkAndConvertBooleanFlag(log_features, "-lf")
     if log_features and len(critical_features) == 0:
-        log("INPUT ERROR: -lf is True even though -cf is empty, i.e. no critical feature specified. This does not make sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -lf is True even though -cf is empty, i.e. no critical feature specified. This does not make sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
         os._exit(1) 
         
     ############# COMMUNICATION MANAGER ##############
-    comman = CommunicationManager(dbuserkey, out_dir, std_out, hdbsql_string, log_features)        
+    comman = CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features)        
         
     ############ CHECK AND CONVERT THE REST OF THE INPUT PARAMETERS ################
     ### online_test_interval, -oi  
@@ -1341,7 +1354,7 @@ def main():
             printout += " as an average from "+str(cf.nbrIterations)+" checks with "+str(cf.interval)+" seconds intervals" 
         log(printout, comman)
     if log_features:
-        log("All information for all features that are in one of the above critical feature states is recorded in the "+comman.out_dir+"/criticalFeatures log", comman)
+        log("All information for all features that are in one of the above critical feature states is recorded in the "+comman.log_dir+"/criticalFeatures log", comman)
     log("Recording mode: "+str(recording_mode), comman)
     log("Recording Type      , Number Recordings   ,   Intervals [seconds] ,   Durations [seconds]      ,    Wait [milliseconds]", comman)  
     log("GStack              , "+str(num_gstacks)+"                   ,   "+str(gstacks_interval)+"                  ,   ", comman)
