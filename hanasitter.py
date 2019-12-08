@@ -92,9 +92,11 @@ def printHelp():
     print("         *** ADMINS (Output Directory, Logging, Output and DB User) ***                                                                             ")
     print(" -od     output directory, full path of the folder where output files will end up (if the folder does not exist it will be created),                ")
     print("         default: '/tmp/hanasitter_output'   (i.e. same as for -ol)                                                                                 ")
+    print(" -odr    output retention days, output files in the path specified with -od are only saved for this number of days, default: -1 (not used)          ")
+    print("         NOTE: -od and -odr holds for hanasitter logs also if -ol and -olr are not specified.                                                       ")
     print(" -ol     log output directory, full path of the folder where HANASitter log files will end up (if the folder does not exist it will be created),    ")
     print("         default: '/tmp/hanasitter_output'   (i.e. same as for -od)                                                                                 ")
-    print(" -or     output log retention days, hanasitterlogs in the path specified with -ol are only saved for this number of days, default: -1 (not used)    ")
+    print(" -olr    log retention days, hanasitterlogs in the path specified with -ol are only saved for this number of days, default: -1 (not used)           ")
     print(" -en     email notification, <sender's email>,<reciever's email>,<mail server>, default:     (not used)                                             ") 
     print("                             example: me@ourcompany.com,you@ourcompany.com,smtp.intra.ourcompany.com                                                ")
     print('         NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  ')
@@ -454,6 +456,13 @@ def file_lines_with_word(file_name, word):
                 lines.append(line)
     return lines 
 
+def clean_outputs(minRetainedOutputDays, comman):
+    path = comman.out_dir
+    nFilesBefore = len([name for name in os.listdir(path)])
+    subprocess.check_output("find "+path+"/* -mtime +"+str(minRetainedOutputDays)+" -delete", shell=True)
+    nFilesAfter = len([name for name in os.listdir(path)])
+    return nFilesBefore - nFilesAfter 
+
 def clean_logs(minRetainedLogDays, comman):
     path = comman.log_dir
     nFilesBefore = len([name for name in os.listdir(path) if "hanasitterlog" in name])
@@ -714,7 +723,7 @@ def parallel_recording(record_type, recorder, hdbcons, comman):
     else:
         return record_kprof(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
 
-def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons):   
+def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, minRetainedOutputDays, host_mode, comman, hdbcons):   
     recorded = False
     offline = False
     while not recorded:
@@ -774,9 +783,13 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                         recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
         if not recorded:
             time.sleep(check_interval)
-            if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
-                nCleaned = clean_logs(minRetainedLogDays, comman)
-                log(str(nCleaned)+" hanasitter daily log files were removed", comman)
+        #house keeping
+        if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
+            nCleaned = clean_logs(minRetainedLogDays, comman)
+            log(str(nCleaned)+" hanasitter daily log files were removed", comman)
+        if minRetainedOutputDays >= 0:   # automatic house keeping of hanasitter output files
+            nCleaned = clean_outputs(minRetainedOutputDays, comman)
+            log(str(nCleaned)+" hanasitter output files were removed", comman)
     return [recorded, offline]
             
 def cdalias(alias, local_dbinstance):   # alias e.g. cdtrace, cdhdb, ...
@@ -839,6 +852,7 @@ def main():
     std_out = "true" #print to std out
     out_dir = "/tmp/hanasitter_output"
     log_dir = "/tmp/hanasitter_output"
+    minRetainedOutputDays = -1 #automatic cleanup of hanasitter output files
     minRetainedLogDays = -1 #automatic cleanup of hanasitterlog
     flag_file = ""    #default: no configuration input file
     log_features = "false"
@@ -927,9 +941,11 @@ def main():
                         after_recorded = flagValue
                     if firstWord == '-od': 
                         out_dir = flagValue
+                    if firstWord == '-odr':
+                        minRetainedOutputDays = flagValue
                     if firstWord == '-ol': 
                         log_dir = flagValue
-                    if firstWord == '-or':
+                    if firstWord == '-olr':
                         minRetainedLogDays = flagValue
                     if firstWord == '-lf': 
                         log_features = flagValue
@@ -995,10 +1011,12 @@ def main():
         after_recorded = sys.argv[sys.argv.index('-ar') + 1]
     if '-od' in sys.argv:
         out_dir = sys.argv[sys.argv.index('-od') + 1]
+    if '-odr' in sys.argv:
+        minRetainedOutputDays = sys.argv[sys.argv.index('-odr') + 1]
     if '-ol' in sys.argv:
         log_dir = sys.argv[sys.argv.index('-ol') + 1]
-    if '-or' in sys.argv:
-        minRetainedLogDays = sys.argv[sys.argv.index('-or') + 1]
+    if '-olr' in sys.argv:
+        minRetainedLogDays = sys.argv[sys.argv.index('-olr') + 1]
     if '-lf' in sys.argv:
         log_features = sys.argv[sys.argv.index('-lf') + 1]
     if '-so' in sys.argv:
@@ -1241,9 +1259,14 @@ def main():
         log("INPUT ERROR: -ar must be an integer. Please see --help for more information.", comman)
         os._exit(1)
     after_recorded = int(after_recorded)
-    ### minRetainedLogDays, -or
+    ### minRetainedOutputDays, -odr
+    if not is_integer(minRetainedOutputDays):
+        log("INPUT ERROR: -odr must be an integer. Please see --help for more information.", comman)
+        os._exit(1)
+    minRetainedOutputDays = int(minRetainedOutputDays)
+    ### minRetainedLogDays, -olr
     if not is_integer(minRetainedLogDays):
-        log("INPUT ERROR: -or must be an integer. Please see --help for more information.", comman)
+        log("INPUT ERROR: -olr must be an integer. Please see --help for more information.", comman)
         os._exit(1)
     minRetainedLogDays = int(minRetainedLogDays)
     ### critical_features, -cf
@@ -1383,7 +1406,7 @@ def main():
             hdbcons.create_temp_output_directories() #create temporary output folders
         while True: 
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
-                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, host_mode, comman, hdbcons)
+                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, minRetainedOutputDays, host_mode, comman, hdbcons)
                 if recorded:
                     if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
                         hdbcons.clear()    #remove temporary output folders before exit
