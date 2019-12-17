@@ -33,7 +33,7 @@ def printHelp():
     print(" -oi     online test interval [seconds], time it waits before it checks if DB is online again, default: 3600 seconds                                ")
     print(" -cpu    a 4 items list to control the cpu check: cpu type, number checks, interval, max average CPU in %, default: 0,0,0,100                       ")
     print("         Possible cpu types are: 0 = not used, 1 = user cpu, 2 = system cpu                                                                         ")
-    print(" -pt     ping timeout [seconds], time it waits before the DB is considered unresponsive, default: 60 seconds                                        ")           
+    print(" -pt     ping timeout [seconds], time it waits before the DB is considered unresponsive (select * from dummy), default: 60 seconds                  ")           
     print(' -cf     list of features surrounded by two "s; the -cf flag has two modes, 1. One Column Mode and 2. Where Clause Mode                             ')
     print("         1. One Column Mode: any sys.m_* view, a column in that view, the column value (wildcards, *, before and/or after are possible) and         ")
     print("            max number allowed feature occations, i.e.                                                                                              ")
@@ -379,6 +379,11 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
         os._exit(1)
     boolean = True if boolean == "true" else False
     return boolean
+
+def checkIfAcceptedFlag(word):
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-so", "-ssl", "-vlh", "-k", "-cpu"]:
+        print "INPUT ERROR: ", word, " is not one of the accapted input flags. Please see --help for more information."
+        os._exit(1)
 
 def is_online(dbinstance, comman):
     process = subprocess.Popen(['sapcontrol', '-nr', dbinstance, '-function', 'GetProcessList'], stdout=subprocess.PIPE)
@@ -894,6 +899,7 @@ def main():
             for line in fin:
                 firstWord = line.strip(' ').split(' ')[0]  
                 if firstWord[0:1] == '-':
+                    checkIfAcceptedFlag(firstWord)
                     flagValue = line.strip(' ').split('"')[1].strip('\n').strip('\r') if line.strip(' ').split(' ')[1][0] == '"' else line.strip(' ').split(' ')[1].strip('\n').strip('\r')
                     if firstWord == '-oi':
                         online_test_interval = flagValue
@@ -962,7 +968,10 @@ def main():
                     if firstWord == '-cpu': 
                         cpu_check_params = [x for x in flagValue.split(',')]
      
-    #####################   INPUT ARGUMENTS (these would overwrite whats in the configuration file)  ####################     
+    #####################   INPUT ARGUMENTS (these would overwrite whats in the configuration file)  #################### 
+    for word in sys.argv:
+        if word[0:1] == '-':
+            checkIfAcceptedFlag(word)
     if '-oi' in sys.argv:
         online_test_interval = sys.argv[sys.argv.index('-oi') + 1]
     if '-pt' in sys.argv:
