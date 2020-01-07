@@ -33,7 +33,8 @@ def printHelp():
     print(" -oi     online test interval [seconds], time it waits before it checks if DB is online again, default: 3600 seconds                                ")
     print(" -cpu    a 4 items list to control the cpu check: cpu type, number checks, interval, max average CPU in %, default: 0,0,0,100                       ")
     print("         Possible cpu types are: 0 = not used, 1 = user cpu, 2 = system cpu                                                                         ")
-    print(" -pt     ping timeout [seconds], time it waits before the DB is considered unresponsive (select * from dummy), default: 60 seconds                  ")           
+    print(" -pt     ping timeout [seconds], time it waits before the DB is considered unresponsive (select * from dummy), if set to 0 the ping test will       ")
+    print("         not be done, default: 60 seconds                                                                                                           ")           
     print(' -cf     list of features surrounded by two "s; the -cf flag has two modes, 1. One Column Mode and 2. Where Clause Mode                             ')
     print("         1. One Column Mode: any sys.m_* view, a column in that view, the column value (wildcards, *, before and/or after are possible) and         ")
     print("            max number allowed feature occations, i.e.                                                                                              ")
@@ -382,7 +383,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
 
 def checkIfAcceptedFlag(word):
     if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-so", "-ssl", "-vlh", "-k", "-cpu"]:
-        print "INPUT ERROR: ", word, " is not one of the accapted input flags. Please see --help for more information."
+        print "INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information."
         os._exit(1)
 
 def is_online(dbinstance, comman):
@@ -736,21 +737,22 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
         if cpu_too_high(cpu_check_params, comman): #first check CPU with 'sar' (i.e. without contacting HANA) if it is too high, record without pinging or feature checking
             recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
         if not recorded:
-            # PING CHECK - to find either hanging or offline situations
-            start_time = datetime.now()
-            [hanging, offline] = hana_ping(ping_timeout, comman)
-            stop_time = datetime.now()
-            if offline:            
-                comment = "DB is offline, will exit the tracker without recording (if DB is online, check that the key can be used with hdbsql)"
-            elif hanging:
-                comment = "No response from DB within "+str(ping_timeout)+" seconds"
-            else:
-                comment = "DB responded faster than "+str(ping_timeout)+" seconds"
-            log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
-            if hanging:
-                recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
-            if offline:
-                return [recorded, offline]    # exit the tracker if HANA turns offline during tracking
+            if ping_timeout != 0:   # possible to turn off PING check with -pt 0
+                # PING CHECK - to find either hanging or offline situations
+                start_time = datetime.now()
+                [hanging, offline] = hana_ping(ping_timeout, comman)
+                stop_time = datetime.now()
+                if offline:            
+                    comment = "DB is offline, will exit the tracker without recording (if DB is online, check that the key can be used with hdbsql)"
+                elif hanging:
+                    comment = "No response from DB within "+str(ping_timeout)+" seconds"
+                else:
+                    comment = "DB responded faster than "+str(ping_timeout)+" seconds"
+                log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
+                if hanging:
+                    recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
+                if offline:
+                    return [recorded, offline]    # exit the tracker if HANA turns offline during tracking
         if not recorded:
             # FEATURE CHECK - only done if recording has not already been done from either the CPU check or from the Ping check
             chid = 0
@@ -1370,7 +1372,10 @@ def main():
                 printout += "\nSystemDB@"+SID+" uses host(s): "+", ".join([h for h in used_hosts])
     log(printout, comman)       
     log("Online, Primary and Not-Secondary Check: Interval = "+str(online_test_interval)+" seconds", comman)
-    log("Ping Check: Interval = "+str(check_interval)+" seconds, Timeout = "+str(ping_timeout)+" seconds", comman)
+    if ping_timeout == 0:
+        log("Ping Check: None", comman)
+    else:
+        log("Ping Check: Interval = "+str(check_interval)+" seconds, Timeout = "+str(ping_timeout)+" seconds", comman)
     log("Feature Checks: Interval "+str(check_interval)+" seconds, Timeout = "+str(feature_check_timeout)+" seconds", comman)
     if host_mode:
         log("Host Mode: Yes, i.e. all critical features below is PER HOST, and recording is done only for those hosts where a critical feature was found crossing allowed limit", comman)
