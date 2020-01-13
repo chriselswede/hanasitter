@@ -46,7 +46,8 @@ def printHelp():
     print('         Note: If you need a , in critical feature, please use \c instead, e.g. add_seconds(BLOCKED_TIME\c600)                                      ')
     print(" -if     number checks and intervals of checks, every odd item of this list specifies how many times each feature check (see -cf) should be executed")
     print("         and every even item specifies how many seconds it waits between each check, then the <max numbers X> in the -cf flag is the maximum        ")
-    print("         allowed average value, e.g. <number checks 1>,<interval [s] 1>,...,<number checks N>,<interval [s] N>, default: [] (not used)              ")
+    print("         allowed average value, e.g. <number checks 1>,<interval [s] 1>,...,<number checks N>,<interval [s] N>,                                     ")  
+    print("         default: [] (not used) so if you only require one check per future, do not use -if                                                         ")
     print(" -tf     feature check time out [seconds], time it waits before the DB is considered unresponsive during a feature check                            ")
     print("         (see -cf), if -if is used this time out will be added to the interval and then multiplied with number checks, default: 60 seconds          ") 
     print(" -lf     log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
@@ -783,11 +784,11 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                     if comman.log_features:
                         log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
                     if hanging or len(hostsWithWrongNbrCFs):
-                        if cf.killSession:
-                            stop_session(cf, comman)
                         if host_mode:
                             hdbcons.hostsForRecording = hostsWithWrongNbrCFs
                         recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
+                        if cf.killSession:
+                            stop_session(cf, comman)
         if not recorded:
             time.sleep(check_interval)
         #house keeping
