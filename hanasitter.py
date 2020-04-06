@@ -153,7 +153,8 @@ def printHelp():
     print(" 3. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                          ")
     print(" 4. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO  (but can be done with cron, see slides)")
     print(" 5. Read config file, -ff, after hanasitter slept, so that it will allow dynamic changes                                                            ")
-    print(" 6. Make the PING check specific for HOSTS (and only record for that host) ... can be done with ROUTE_TO(<volume_id_1>, ..., <volume_id_n>)         ")
+    print(" 6. Make the PING check specific for HOSTS (and only record for that host) ... can be done... with hint ROUTE_TO(<volume_id_1>, ..., <volume_id_n>) ")
+    print(" 7. Force -ks prior to data collection for certain critical features                                                                                ")
     print("                                                                                                                                                    ")
     print("AUTHOR: Christian Hansen                                                                                                                            ")
     print("                                                                                                                                                    ")
@@ -170,11 +171,11 @@ def printDisclaimer():
     print(" 5. HANASitter is a one-man's hobby (developed, maintained and supported only during non-working hours)                           ")
     print(" 6  All HANASitter documentations have to be read and understood before any usage:                                                ")
     print("     a) SAP Note 2399979                                                                                                          ")
-    print("     b) The .pdf file that can be downloaded at the bottom of SAP Note 2399979                                                    ")
+    print("     b) The .pdf file that can be downloaded from https://github.com/chriselswede/hanasitter                                      ")
     print("     c) All output from executing                                                                                                 ")
     print("                     python hanasitter.py --help                                                                                  ")
-    print(" 7. HANASitter can help you to automize certain monitoring tasks but is not an attempt to teach you how to monitor SAP HANA       ")
-    print("    I.e. if you do not know what you want to do, HANASitter cannot help, but if you do know, HANASitter can automitize it         ")
+    print(" 7. HANASitter can help you to automize certain monitoring tasks but is NOT an attempt to teach you how to monitor SAP HANA       ")
+    print("    I.e. if you do not know what you want to do, HANASitter cannot help, but if you do know, HANASitter can maybe automitize it   ")
     print(" 8. HANASitter is not providing any recommendations, all flags shown in the documentation (see point 6.) are only examples        ")
     os._exit(1)
 
@@ -1052,15 +1053,14 @@ def main():
         os._exit(1)
     ENV = key_environment.split('\n')[1].replace('  ENV : ','').replace(';',',').split(',')
     key_hosts = [env.split(':')[0] for env in ENV] 
-    if not local_host in key_hosts and not 'localhost' in key_hosts:
+    key_hosts_short_vhname = [key_host.split('.')[0] for key_host in key_hosts]  # to deal with HSR and virtual host names (from Marco)
+    if not local_host in key_hosts and not 'localhost' in key_hosts and not local_host in key_hosts_short_vhname and not 'localhost' in key_hosts_short_vhname:
         #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
         #possible future masters in the hdbuserstore:   virt1:30413,virt3:30413,virt4:30413, so he executed HANASitter on virt2 with  -vlh virt2  --> worked fine
-        #print "ERROR, local host, ", local_host, ", should be one of the hosts specified for the key, ", dbuserkey, ", in case of virtual use -vlh."
-        #os._exit(1)
-        #Instead of Error, just do Warning (consider to remove Warning...)
+        # --> Instead of Error, just do Warning (consider to remove Warning...)
         print "WARNING, local host, ", local_host, ", should be one of the hosts specified for the key. It is not, so will assume the SQL port of the first one. Continue on own risk!"
         local_host_index = 0
-    elif not local_host in key_hosts and 'localhost' in key_hosts:
+    elif not local_host in key_hosts and 'localhost' in key_hosts and not local_host in key_hosts_short_vhname and 'localhost' in key_hosts_short_vhname: # Marco added key_hosts_short_vhname
         local_host_index = 0
     else:
         local_host_index = key_hosts.index(local_host)       
@@ -1113,8 +1113,9 @@ def main():
     ### SCALE OUT or Single Host ###
     hosts_worker_and_standby = subprocess.check_output('sapcontrol -nr '+local_dbinstance+' -function GetSystemInstanceList', shell=True).splitlines(1)
     hosts_worker_and_standby = [line.split(',')[0] for line in hosts_worker_and_standby if ("HDB" in line or "HDB|HDB_WORKER" in line or "HDB|HDB_STANDBY" in line)] #Should we add HDB|HDB_XS_WORKER also?
+    hosts_worker_and_standby_short = [host.split('.')[0] for host in hosts_worker_and_standby] # to deal with HSR and virtual host names (from Marco)
     for aHost in key_hosts:  #Check that hosts provided in hdbuserstore are correct
-        if not aHost in hosts_worker_and_standby and not aHost in ['localhost']:
+        if not aHost in hosts_worker_and_standby and not aHost.split('.')[0] in hosts_worker_and_standby_short and not aHost in ['localhost']:
             print "ERROR: The host, "+aHost+", provided with the user key, "+dbuserkey+", is not one of the worker or standby hosts: ", hosts_worker_and_standby
             os._exit(1)
             
