@@ -1053,14 +1053,13 @@ def main():
         os._exit(1)
     ENV = key_environment.split('\n')[1].replace('  ENV : ','').replace(';',',').split(',')
     key_hosts = [env.split(':')[0] for env in ENV] 
-    key_hosts_short_vhname = [key_host.split('.')[0] for key_host in key_hosts]  # to deal with HSR and virtual host names (from Marco)
-    if not local_host in key_hosts and not 'localhost' in key_hosts and not local_host in key_hosts_short_vhname and not 'localhost' in key_hosts_short_vhname:
+    if not local_host in key_hosts and not 'localhost' in key_hosts and not 'localhost' in key_hosts_short_vhname:
         #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
         #possible future masters in the hdbuserstore:   virt1:30413,virt3:30413,virt4:30413, so he executed HANASitter on virt2 with  -vlh virt2  --> worked fine
         # --> Instead of Error, just do Warning (consider to remove Warning...)
         print "WARNING, local host, ", local_host, ", should be one of the hosts specified for the key. It is not, so will assume the SQL port of the first one. Continue on own risk!"
         local_host_index = 0
-    elif not local_host in key_hosts and 'localhost' in key_hosts and not local_host in key_hosts_short_vhname and 'localhost' in key_hosts_short_vhname: # Marco added key_hosts_short_vhname
+    elif not local_host in key_hosts and 'localhost' in key_hosts:
         local_host_index = 0
     else:
         local_host_index = key_hosts.index(local_host)       
