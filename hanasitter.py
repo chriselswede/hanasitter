@@ -32,7 +32,7 @@ def printHelp():
     print("         *** CHECKS (Pings and/or Feature Checks and/or CPU Checks) ***                                                                             ")
     print(" -oi     online test interval [seconds], time it waits before it checks if DB is online again, default: 3600 seconds                                ")
     print(" -cpu    a 4 items list to control the cpu check: cpu type, number checks, interval, max average CPU in %, default: 0,0,0,100                       ")
-    print("         Possible cpu types are: 0 = not used, 1 = user cpu, 2 = system cpu                                                                         ")
+    print("         Possible cpu types are: 0 = not used, 1 = user cpu, 2 = system cpu, 3 = both user and system                                               ")
     print(" -pt     ping timeout [seconds], time it waits before the DB is considered unresponsive (select * from dummy), if set to 0 the ping test will       ")
     print("         not be done, default: 60 seconds                                                                                                           ")           
     print(' -cf     list of features surrounded by two "s; the -cf flag has two modes, 1. One Column Mode and 2. Where Clause Mode                             ')
@@ -149,12 +149,11 @@ def printHelp():
     print("                                                                                                                                                    ")
     print("CURRENT KNOWN LIMITATIONS (i.e. TODO LIST):                                                                                                         ")
     print(" 1. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                             ")
-    print(" 2. If a CPU only happens on one Host, possible to record on only one Host --> not possible to do this with SAR --> possible to run one HANASitter  ")
-    print("    on each slave only using CPU checks                                                                                                             ")                                   
-    print(" 3. CPU should be possible to be checked for BOTH system AND user --> TODO                                                                          ")
+    print(" 2. If a CPU only happens on one Host, possible to record on only one Host --> not possible to do this with SAR                                     ")                                   
     print(" 4. Let HANASitter first check that there is no other hanasitter process running --> refuse to run --> TODO  (but can be done with cron, see slides)")
     print(" 5. Read config file, -ff, after hanasitter slept, so that it will allow dynamic changes                                                            ")
-    print(" 6. Make the PING check specific for HOSTS (and only record for that host) ... can be done... with hint ROUTE_TO(<volume_id_1>, ..., <volume_id_n>) ")
+    print(" 6. Make the PING check specific for HOSTS (and only record for that host) --> not possible! Could be done hint ROUTE_TO(<volume_id_1>, ...)        ")
+    print("              BUT to get the volume_id I must read M_VOLUMES with SQL and to rely on SQL before the PING check destroys the purpose of this check   ")
     print(" 7. Force -ks prior to data collection for certain critical features                                                                                ")
     print(" 8. Average of CPU checks                                                                                                                           ")
     print("                                                                                                                                                    ")
@@ -511,23 +510,29 @@ def tenant_names_and_ports(daemon_file):
     return [tenantDBNames, tenantIndexserverPorts]
 
 def cpu_too_high(cpu_check_params, comman):
-    if int(cpu_check_params[0]) == 0 or int(cpu_check_params[1]) == 0 or int(cpu_check_params[3]) == 100: # if CPU type is 0 or if number CPU checks is 0 or allowed CPU is 100 then no CPU check
+    any_cpu_too_high = False
+    input_cpu_type = int(cpu_check_params[0])
+    if input_cpu_type == 0 or int(cpu_check_params[1]) == 0 or int(cpu_check_params[3]) == 100: # if CPU type is 0 or if number CPU checks is 0 or allowed CPU is 100 then no CPU check
         return False
-    start_time = datetime.now()
-    command_run = subprocess.check_output("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2], shell=True)
-    sar_words = command_run.split()
-    cpu_column = 2 if int(cpu_check_params[0]) == 1 else 4
-    current_cpu = sar_words[sar_words.index('Average:') + cpu_column]
-    if not is_number(current_cpu):
-        print "ERROR, something went wrong while using sar. Output = "
-        print command_run
-        os._exit(1)
-    too_high_cpu = float(current_cpu) > int(cpu_check_params[3])
-    stop_time = datetime.now()
-    cpu_string = "User CPU Check  " if int(cpu_check_params[0]) == 1 else "System CPU Check"
-    printout = cpu_string+"  , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         , "+str(not too_high_cpu)+"       , Av. CPU = "+current_cpu+" % (Allowed = "+cpu_check_params[3]+" %) "
-    log(printout, comman, sendEmail = too_high_cpu)
-    return too_high_cpu
+    for cpu_type in [1,2]:
+        if cpu_type == input_cpu_type or input_cpu_type == 3:
+            start_time = datetime.now()
+            command_run = subprocess.check_output("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2], shell=True)
+            sar_words = command_run.split()
+            cpu_column = 2 if cpu_type == 1 else 4
+            current_cpu = sar_words[sar_words.index('Average:') + cpu_column]
+            if not is_number(current_cpu):
+                print "ERROR, something went wrong while using sar. Output = "
+                print command_run
+                os._exit(1)
+            too_high_cpu = float(current_cpu) > int(cpu_check_params[3])
+            if too_high_cpu:
+                any_cpu_too_high = True
+            stop_time = datetime.now()
+            cpu_string = "User CPU Check  " if cpu_type == 1 else "System CPU Check"
+            printout = cpu_string+"  , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         , "+str(not too_high_cpu)+"       , Av. CPU = "+current_cpu+" % (Allowed = "+cpu_check_params[3]+" %) "
+            log(printout, comman, sendEmail = too_high_cpu)
+    return any_cpu_too_high
 
 def stop_session(cf, comman):
     heather = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select top 1 * from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).splitlines(1)
@@ -1321,8 +1326,8 @@ def main():
     if int(cpu_check_params[3]) > 100:
         log("INPUT ERROR: The fourth element of the -cpu flag is in %, i.e. [0,100]. Please see --help for more information.", comman)
         os._exit(1)
-    if not (int(cpu_check_params[0]) in [0,1,2]):
-        log("INPUT ERROR: CPU checks type has to be either 0, 1 or 2. Please see --help for more information.", comman)
+    if not (int(cpu_check_params[0]) in [0,1,2,3]):
+        log("INPUT ERROR: CPU checks type has to be either 0, 1, 2 or 3. Please see --help for more information.", comman)
         os._exit(1)
     if (int(cpu_check_params[0]) > 0) and (int(cpu_check_params[1]) == 0):
         log("INPUT ERROR: If cpu checks with this cpu type are to be done the number of checks cannot be zero. Please see --help for more information.", comman)
@@ -1406,8 +1411,13 @@ def main():
         log("RTE Dumps (light)   , "+str(num_rtedumps)+"                   ,   "+str(rtedumps_interval)+"                  ,   ", comman)
     log("Recording Priority: "+recording_prio_convert(recording_prio), comman)
     if int(cpu_check_params[0]) > 0:
-        cpu_string = "User CPU Check:     " if int(cpu_check_params[0]) == 1 else "System CPU Check: "
-        log(cpu_string+", Every "+cpu_check_params[2]+" seconds, Number CPU Checks = "+cpu_check_params[1]+", Max allowed av. CPU = "+cpu_check_params[3]+" %", comman)
+        if int(cpu_check_params[0]) == 1:
+            cpu_string = "User CPU Check:            "
+        elif int(cpu_check_params[0]) == 2:
+            cpu_string = "System CPU Check:          "
+        else:
+            cpu_string = "User and System CPU Check: "
+        log(cpu_string+" Every "+cpu_check_params[2]+" seconds, Number CPU Checks = "+cpu_check_params[1]+", Max allowed av. CPU = "+cpu_check_params[3]+" %", comman)
     if after_recorded < 0:
         log("After Recording: Exit", comman)
     else:
