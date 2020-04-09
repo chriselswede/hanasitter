@@ -499,7 +499,7 @@ def tenant_names_and_ports(daemon_file):
             elif foundNewName and not foundInstanceIds and "instanceids = " in line:
                 ports_second_halfs.append(line.strip("instanceids = ").strip("\n"))
                 foundInstanceIds = True
-            elif foundNewName and not line:  # the order of instance ids and arguments are different in SPS03 and SPS04
+            elif foundNewName and not line.strip("\n"):  # the order of instance ids and arguments are different in SPS03 and SPS04
                 if foundFirstPortHalf and foundInstanceIds:
                     foundNewName = False
                     foundFirstPortHalf = False
