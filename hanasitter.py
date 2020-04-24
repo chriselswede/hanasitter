@@ -275,8 +275,9 @@ class HDBCONS:
     def create_temp_output_directories(self): # CREATE TEMPORARY OUTPUT DIRECTORIES and SET PRIVILEGES (CHMOD)
         cdtrace_path_local = cdalias('cdtrace', self.local_dbinstance)
         if not self.local_host in cdtrace_path_local:
-            print "ERROR, local host, ", self.local_host, ", is not part of cdtrace, ", cdtrace_path_local
-            os._exit(1)
+            print "WARNING, local host: ", self.local_host, ", should be part of cdtrace: ", cdtrace_path_local, ". It is not. Continue on your own risk!"
+            #print "ERROR, local host, ", self.local_host, ", is not part of cdtrace, ", cdtrace_path_local
+            #os._exit(1)
         for host in self.hosts:
             
             #NOt NEEDED?
