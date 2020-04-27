@@ -617,6 +617,7 @@ def record_kprof(kprofiler, hdbcons, comman):   # SAP Note 1804811
             time.sleep(kprofiler.kprofs_duration) 
             os.system(hdbcon_string+'profiler stop" > '+out_dir+filename_kprof_log)    
             os.system(hdbcon_string+'profiler print -o '+tmp_dir+filename_cpu+','+tmp_dir+filename_wait+'" > '+out_dir+filename_kprof_log)
+            os.system(hdbcon_string+'profiler clear" > '+out_dir+filename_kprof_log) # added to avoid an entry in M_KERNEL_PROFILER 
             stop_time = datetime.now()
             if "[ERROR]" in open(out_dir+filename_kprof_log).read():
                 printout = "Kernel Profiler   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , False        ,   None     , "+out_dir+filename_kprof_log
