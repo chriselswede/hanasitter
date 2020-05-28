@@ -99,8 +99,9 @@ def printHelp():
     print(" -ol     log output directory, full path of the folder where HANASitter log files will end up (if the folder does not exist it will be created),    ")
     print("         default: '/tmp/hanasitter_output'   (i.e. same as for -od)                                                                                 ")
     print(" -olr    log retention days, hanasitterlogs in the path specified with -ol are only saved for this number of days, default: -1 (not used)           ")
-    print(" -en     email notification, <sender's email>,<reciever's email>,<mail server>, default:     (not used)                                             ") 
-    print("                             example: me@ourcompany.com,you@ourcompany.com,smtp.intra.ourcompany.com                                                ")
+    print(" -en     email notification, <receiver 1's email>,<receiver 2's email>,... default:          (not used)                                             ") 
+    print(" -ens    sender's email, to explicit specify sender's email address, only useful if -en if used, default:    (sender's email configured used)       ")
+    print(" -enm    mail server, to explicit specify mail server, only useful if -en is used, default:     (mail server configured used)                       ")
     print('         NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  ')
     print("               sendmail.cf in /etc/mail/, see https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/           ")
     print(" -so     standard out switch [true/false], switch to write to standard out, default:  true                                                          ")
@@ -207,16 +208,21 @@ class KernelProfileSetting:
         self.kprofs_wait = kprofs_wait
 
 class EmailNotification:
-    def __init__(self, senderEmail, recieverEmail, mailServer, SID):
+    def __init__(self, receiverEmails, senderEmail, mailServer, SID):
         self.senderEmail = senderEmail
-        #self.senderPassword = senderPassword
-        self.recieverEmail = recieverEmail
+        self.receiverEmails = receiverEmails
         self.mailServer = mailServer
-        #self.mailServerPort = mailServerPort
-        #self.timeout = timeout
         self.SID = SID
     def printEmailNotification(self):
-        print "Sender Email: ", self.senderEmail, " Reciever Email: ", self.recieverEmail, " Mail Server: ", self.mailServer 
+        if self.senderEmail:
+            print "Sender Email: ", self.senderEmail
+        else:
+            print "Configured sender email will be used."
+        if self.mailServer:
+            print "Mail Server: ", self.mailServer
+        else:
+            print "Configured mail server will be used."
+        print "Reciever Emails: ", self.recieverEmails
 
 #### Remember:
 #Nameserver port is always 3**01 and SQL port = 3**13 valid for,
@@ -386,7 +392,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-so", "-ssl", "-vlh", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-k", "-cpu"]:
         print "INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information."
         os._exit(1)
 
@@ -833,7 +839,12 @@ def log(message, comman, file_name = "", sendEmail = False):
     global emailNotification
     if sendEmail and emailNotification:  #sends email IF this call of log() wants it AND IF -en flag has been specified        
         #MAILX (https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/):
-        mailstring = 'echo "'+message+'" | mailx -s "Message from HANASitter about '+emailNotification.SID+'" -S smtp=smtp://'+emailNotification.mailServer+' -S from="'+emailNotification.senderEmail+'" '+emailNotification.recieverEmail
+        mailstring = 'echo "'+message+'" | mailx -s "Message from HANASitter about '+emailNotification.SID+'" '
+        if emailNotification.mailServer:
+            mailstring += ' -S smtp=smtp://'+emailNotification.mailServer+' '
+        if emailNotification.senderEmail:
+            mailstring += ' -S from="'+emailNotification.senderEmail+'" '
+        mailstring += ",".join(emailNotification.receiverEmails)
         #print mailstring
         output = subprocess.check_output(mailstring, shell=True)
     
@@ -874,7 +885,9 @@ def main():
     minRetainedLogDays = -1 #automatic cleanup of hanasitterlog
     flag_file = ""    #default: no configuration input file
     log_features = "false"
-    email_notification = None
+    receiver_emails = None
+    senders_email = None
+    mail_server = None
     ssl = "false"
     virtual_local_host = "" #default: assume physical local host
     dbuserkey = 'SYSTEMKEY' # This KEY has to be maintained in hdbuserstore  
@@ -969,7 +982,11 @@ def main():
                     if firstWord == '-lf': 
                         log_features = flagValue
                     if firstWord == '-en': 
-                        email_notification = [x for x in flagValue.split(',')]
+                        receiver_emails = [x for x in flagValue.split(',')]
+                    if firstWord == '-ens': 
+                        senders_email = flagValue
+                    if firstWord == '-enm': 
+                        mail_server = flagValue
                     if firstWord == '-so': 
                         std_out = flagValue
                     if firstWord == '-ssl': 
@@ -1044,7 +1061,11 @@ def main():
     if '-so' in sys.argv:
         std_out = int(sys.argv[sys.argv.index('-so') + 1])
     if '-en' in sys.argv:
-        email_notification = [x for x in sys.argv[  sys.argv.index('-en') + 1   ].split(',')] 
+        receiver_emails = [x for x in sys.argv[  sys.argv.index('-en') + 1   ].split(',')] 
+    if '-ens' in sys.argv:
+        senders_email = sys.argv[sys.argv.index('-ens') + 1]
+    if '-enm' in sys.argv:
+        mail_server = sys.argv[sys.argv.index('-enm') + 1]
     if '-ssl' in sys.argv:
         ssl = sys.argv[sys.argv.index('-ssl') + 1]
     if '-vlh' in sys.argv:
@@ -1348,19 +1369,29 @@ def main():
         if (num_rtedumps <= 0 and num_callstacks <= 0 and num_gstacks <= 0 and num_kprofs <= 0 and log_features == False):
             log("INPUT ERROR: No kill-session and no recording is specified (-nr, -nc, -ng, and -np are all <= 0, or none of them are specified and -lf = false). It then makes no sense to run hanasitter. Please see --help for more information.", comman)
             os._exit(1)
-    ### email_notification, -en
-    if email_notification:
-        if not len(email_notification) == 3:
-            log("INPUT ERROR: -en requires 3 elements, seperated by a comma only. Please see --help for more information.", comman)
+    ### receiver_emails, -en
+    if receiver_emails:
+        if any(not is_email(element) for element in receiver_emails):
+            log("INPUT ERROR: some element(s) of -en is/are not email(s). Please see --help for more information.", comman)
             os._exit(1)
-        if not is_email(email_notification[0]) or not is_email(email_notification[1]):
-            log("INPUT ERROR: first and second element of -en have to be valid emails. Please see --help for more information.", comman)
-            os._exit(1)
+    ### senders_email, -ens
+        if senders_email:
+            if not receiver_emails:
+                log("INPUT ERROR: -ens is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
+                os._exit(1)
+            if not is_email(senders_email):
+                log("INPUT ERROR: -ens is not an email. Please see --help for more information.", comman)
+                os._exit(1)
+    ### senders_email, -enm
+        if mail_server:
+            if not receiver_emails:
+                log("INPUT ERROR: -enm is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
+                os._exit(1)
 
     ############# EMAIL NOTIFICATION ##############
-    if email_notification:
+    if receiver_emails:
         global emailNotification
-        emailNotification = EmailNotification(email_notification[0], email_notification[1], email_notification[2], SID)
+        emailNotification = EmailNotification(receiver_emails, senders_email, mail_server, SID)
 
     ### FILL HDBCONS STRINGS ###
     hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName)
