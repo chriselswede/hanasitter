@@ -551,7 +551,14 @@ def stop_session(cf, comman):
         for connId in connIds:
             printout = "Will disconnect session "+connId+" due to the check: "+cf.whereClauseDescription
             log(printout, comman)
-            subprocess.check_output(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """, shell=True)
+            try:
+                subprocess.check_output(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """, shell=True)
+                printout = "Succesfully disconnected session "+connId
+                log(printout, comman)
+            except:
+                printout = "Session "+connId+" got disconnected by itself before HANASitter tried"
+                log(printout, comman)
+            
         
 
 def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman):   # cf = critical_feature, # comman = communication manager
@@ -1111,6 +1118,8 @@ def main():
     tenantIndexserverPorts = [line.split(' ')[-1].strip('\n') for line in output if "hdbindexserver -port" in line]
     tenantDBNames = [line.split(' ')[0].replace('adm','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated
     is_mdc = len(tenantIndexserverPorts) > 0
+    #TEMP
+    print 'ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock'
     output = subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock', shell=True).splitlines(1)
     nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
     
