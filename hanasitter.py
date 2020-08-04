@@ -44,6 +44,8 @@ def printHelp():
     print('         default: ""                                                                                                                                ')
     print('         Note: <limit> should be an integer, or an integer preceded by < (for maximum allowed) or > (for minumum allowed)                           ')
     print('         Note: If you need a , in critical feature, please use \c instead, e.g. add_seconds(BLOCKED_TIME\c600)                                      ')
+    print(' -cd     critical feature deliminiter mode, 1 = the deliminiter of -cf is ,  2 = the deliminiter of -cf is ;     default: 1 (backward compatible)   ')
+    print('         Note: Sometimes it is needed to have a , in the SQL of the WHERE clause for -cf, e.g. ADD_SECONDS(CURRENT_TIME, -60), then use -cd 2       ')
     print(" -if     number checks and intervals of checks, every odd item of this list specifies how many times each feature check (see -cf) should be executed")
     print("         and every even item specifies how many seconds it waits between each check, then the <max numbers X> in the -cf flag is the maximum        ")
     print("         allowed average value, e.g. <number checks 1>,<interval [s] 1>,...,<number checks N>,<interval [s] N>,                                     ")  
@@ -134,6 +136,9 @@ def printHelp():
     print("EXAMPLE (if there are more then 5 threads with a thread method that starts with PlanExecutor or with a thread type that                             ")
     print("         includes Attribute or that is executed from any user starting with DUSER12, then 5 GStacks are recorded                                    ") 
     print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_METHOD,PlanExecutor*,5,M_SERVICE_THREADS,THREAD_TYPE,*Attribute*,5,M_SERVICE_THREADS,USER_NAME,DUSER12*,5" -ng 5 ')
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (use -cd 2 to use ; as deliminiter of -cf instead of ,)                                                                                     ")
+    print('''> python hanasitter.py -cf "M_SERVICE_THREADS;WHERE;IS_ACTIVE='TRUE' and SERVICE_NAME='indexserver';3" -nc 1 -cd 2                              ''')
     print("                                                                                                                                                    ")
     print("EXAMPLE (reads a configuration file, but one flag will overwrite what is in the configuration file, i.e. there will be 3 callstacks instead of 2):  ")
     print("  > python hanasitter.py -ff /tmp/HANASitter/hanasitter_configfile.txt -nc 3                                                                        ")
@@ -392,7 +397,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-k", "-cpu"]:
         print "INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information."
         os._exit(1)
 
@@ -546,7 +551,10 @@ def stop_session(cf, comman):
     heather = heather[0].strip('\n').strip(' ').split('|')
     heather = [h.strip(' ') for h in heather if h != '']
     if 'CONNECTION_ID' in heather:
-        connIds = subprocess.check_output(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).splitlines(1)
+        additionalWhere = ''
+        if cf.view == 'M_ACTIVE_STATEMENTS':  # to avoid finding itself
+            additionalWhere = " and STATEMENT_STRING not like '%select distinct CONNECTION_ID from SYS.%'"
+        connIds = subprocess.check_output(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+additionalWhere+'"', shell=True).splitlines(1)
         connIds = [c.strip('\n').strip('|').strip(' ') for c in connIds]
         for connId in connIds:
             printout = "Will disconnect session "+connId+" due to the check: "+cf.whereClauseDescription
@@ -970,8 +978,14 @@ def main():
                         kprofs_duration = flagValue
                     if firstWord == '-wp': 
                         kprofs_wait = flagValue
+                    cf_deliminiter_mode = '1' # default: deliminiter is , 
+                    if firstWord == '-cd': 
+                        cf_deliminiter_mode = flagValue
                     if firstWord == '-cf': 
-                        critical_features = [x.strip('"') for x in flagValue.split(',')]
+                        if cf_deliminiter_mode == '2':
+                            critical_features = [x.strip('"') for x in flagValue.split(';')]
+                        else:
+                            critical_features = [x.strip('"') for x in flagValue.split(',')]
                     if firstWord == '-if': 
                         intervals_of_features = [x.strip('"') for x in flagValue.split(',')]
                     if firstWord == '-tf': 
@@ -1045,8 +1059,14 @@ def main():
         kprofs_duration = sys.argv[sys.argv.index('-dp') + 1]
     if '-wp' in sys.argv:
         kprofs_wait = sys.argv[sys.argv.index('-wp') + 1]
+    cf_deliminiter_mode = '1' # default: deliminiter is ,
+    if '-cd' in sys.argv:
+        cf_deliminiter_mode = sys.argv[sys.argv.index('-cd') + 1]
     if '-cf' in sys.argv:
-        critical_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-cf') + 1   ].split(',')] 
+        if cf_deliminiter_mode == '2':
+            critical_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-cf') + 1   ].split(';')]
+        else:
+            critical_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-cf') + 1   ].split(',')] 
         if critical_features == ['']:   # allow no critical feature with -cf ""
             critical_features = []      # make the length 0 in case of -cf ""
     if '-if' in sys.argv:
@@ -1118,8 +1138,6 @@ def main():
     tenantIndexserverPorts = [line.split(' ')[-1].strip('\n') for line in output if "hdbindexserver -port" in line]
     tenantDBNames = [line.split(' ')[0].replace('adm','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated
     is_mdc = len(tenantIndexserverPorts) > 0
-    #TEMP
-    print 'ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock'
     output = subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock', shell=True).splitlines(1)
     nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
     
