@@ -404,7 +404,7 @@ def checkIfAcceptedFlag(word):
 def is_online(dbinstance, comman):
     process = subprocess.Popen(['sapcontrol', '-nr', dbinstance, '-function', 'GetProcessList'], stdout=subprocess.PIPE)
     out, err = process.communicate()
-    number_services = out.count(" HDB ") + out.count(" Local Secure Store ")   
+    number_services = out.count(" HDB ") + out.count(" Local Secure Store")   
     number_running_services = out.count("GREEN")
     test_ok = (str(err) == "None")
     result = number_running_services == number_services
