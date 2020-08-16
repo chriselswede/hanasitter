@@ -346,7 +346,9 @@ class CriticalFeature:
                 if value[1] == '%' or value[-1] == '%':
                     self.whereClause = feature + " like " + value   #where-clause with wildcard(s)
                 else:
-                    self.whereClause = feature + " = " + value      #where-clause without wildcard(s)     
+                    self.whereClause = feature + " = " + value      #where-clause without wildcard(s)  
+            if self.view == 'M_ACTIVE_STATEMENTS':              # to avoid finding itself:
+                self.whereClause += " and STATEMENT_STRING not like '%M_ACTIVE_STATEMENTS%'"   
         self.value = value
         self.limitIsMinimumNumberCFAllowed = (limit[0] == '>') # so default and < then maximum number CF allowed 
         if limit[0] in ['<', '>']:
@@ -546,26 +548,28 @@ def cpu_too_high(cpu_check_params, comman):
             log(printout, comman, sendEmail = too_high_cpu)
     return any_cpu_too_high
 
-def stop_session(cf, comman):
-    heather = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select top 1 * from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).splitlines(1)
-    heather = heather[0].strip('\n').strip(' ').split('|')
-    heather = [h.strip(' ') for h in heather if h != '']
-    if 'CONNECTION_ID' in heather:
-        additionalWhere = ''
-        if cf.view == 'M_ACTIVE_STATEMENTS':  # to avoid finding itself
-            additionalWhere = " and STATEMENT_STRING not like '%select distinct CONNECTION_ID from SYS.%'"
-        connIds = subprocess.check_output(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+additionalWhere+'"', shell=True).splitlines(1)
+def stop_session(cf, comman):    
+    connExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where VIEW_COLUMN_NAME = 'CONNECTION_ID' and VIEW_NAME = '"+cf.view+"'\"", shell=True).strip(' '))
+    if connExists:
+        connIds = subprocess.check_output(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).splitlines(1)
         connIds = [c.strip('\n').strip('|').strip(' ') for c in connIds]
         for connId in connIds:
-            printout = "Will disconnect session "+connId+" due to the check: "+cf.whereClauseDescription
-            log(printout, comman)
-            try:
-                subprocess.check_output(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """, shell=True)
-                printout = "Succesfully disconnected session "+connId
-                log(printout, comman)
-            except:
-                printout = "Session "+connId+" got disconnected by itself before HANASitter tried"
-                log(printout, comman)
+            connExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"", shell=True).strip(' '))
+            if not connExists:
+                log("Connection "+connId+" was already disconnected before HANASitter got to it", comman)
+            else:
+                log("Will disconnect session "+connId+" due to the check: "+cf.whereClauseDescription, comman)
+                try:
+                    subprocess.check_output(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """, shell=True)
+                    connExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"", shell=True).strip(' '))
+                    if connExists:
+                        log("WARNING, statement \n    ALTER SYSTEM DISCONNECT SESSION '"+connId+"'\nwas executed but the connection "+connId+" is still there. It might take some time until it actually disconnects.", comman)
+                    else:
+                        log("Succesfully disconnected session "+connId, comman)
+                except:
+                    log("Session "+connId+" got disconnected by itself before HANASitter tried", comman)
+    else:
+        log("WARNING, the view in the Critical Feature has no CONNECTION_ID column, so the session for this Critical Feature cannot be killed", comman)
             
         
 
