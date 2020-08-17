@@ -162,6 +162,7 @@ def printHelp():
     print("              BUT to get the volume_id I must read M_VOLUMES with SQL and to rely on SQL before the PING check destroys the purpose of this check   ")
     print(" 7. Force -ks prior to data collection for certain critical features                                                                                ")
     print(" 8. Average of CPU checks                                                                                                                           ")
+    print(" 9. Add flags with possible sentences to add in the email messages  ... different flags for different checks ...                                    ")
     print("                                                                                                                                                    ")
     print("AUTHOR: Christian Hansen                                                                                                                            ")
     print("                                                                                                                                                    ")
@@ -858,7 +859,7 @@ def log(message, comman, file_name = "", sendEmail = False):
     global emailNotification
     if sendEmail and emailNotification:  #sends email IF this call of log() wants it AND IF -en flag has been specified        
         #MAILX (https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/):
-        message += 'Hi Team, \nAn odd event reported on the server. Here below are the details:\n'+message
+        message = 'Hi Team, \nAn odd event reported on the server. Here below are the details:\n'+message
         mailstring = 'echo "'+message+'" | mailx -s "Message from HANASitter about '+emailNotification.SID+'" '
         if emailNotification.mailServer:
             mailstring += ' -S smtp=smtp://'+emailNotification.mailServer+' '
