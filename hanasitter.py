@@ -858,6 +858,7 @@ def log(message, comman, file_name = "", sendEmail = False):
     global emailNotification
     if sendEmail and emailNotification:  #sends email IF this call of log() wants it AND IF -en flag has been specified        
         #MAILX (https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/):
+        message += 'Hi Team, \nAn odd event reported on the server. Here below are the details:\n'+message
         mailstring = 'echo "'+message+'" | mailx -s "Message from HANASitter about '+emailNotification.SID+'" '
         if emailNotification.mailServer:
             mailstring += ' -S smtp=smtp://'+emailNotification.mailServer+' '
