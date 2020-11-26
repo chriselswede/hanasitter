@@ -110,7 +110,9 @@ def printHelp():
     print(" -ff     flag file, full path to a file that contains input flags, each flag in a new line, all lines in the file that does not start with a        ")
     print("         flag are considered comments, if this flag is used no other flags should be given, default: '' (not used)                                  ")
     print(" -ssl    turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, default: false                                ") 
-    print(" -vlh    virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")                
+    print(" -vlh    virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")
+    print(" -hc     host checking [true/false], checks if the host is the same as in cdtrace and provided in hdbuserkey, might be necessary to turn to false   ")
+    print("         e.g. if you for some reason must provide full host name in hdbuserkey (it will still give warnings though), default: true                  ")                
     print(" -k      DB user key, this one has to be maintained in hdbuserstore, i.e. as <sid>adm do                                                            ")               
     print("         > hdbuserstore SET <DB USER KEY> <ENV> <USERNAME> <PASSWORD>                     , default: SYSTEMKEY                                      ")
     print("                                                                                                                                                    ")    
@@ -284,14 +286,16 @@ class HDBCONS:
                     self.hdbcons_strings.append('hdbcons "distribute exec '+host+':'+self.communicationPort+' ')                # SAP Note 2222218
             else:                       # MDC (both SystemDB and Tenant)
                 self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+self.communicationPort+' ')   # SAP Notes 2222218 and 2410143
-    def create_temp_output_directories(self): # CREATE TEMPORARY OUTPUT DIRECTORIES and SET PRIVILEGES (CHMOD)
+    def create_temp_output_directories(self, host_check): # CREATE TEMPORARY OUTPUT DIRECTORIES and SET PRIVILEGES (CHMOD)
         cdtrace_path_local = cdalias('cdtrace', self.local_dbinstance)
         if not self.local_host in cdtrace_path_local:
-            print "WARNING, local host: ", self.local_host, ", should be part of cdtrace: ", cdtrace_path_local, ". It is not. Continue on your own risk!"
-            #print "ERROR, local host, ", self.local_host, ", is not part of cdtrace, ", cdtrace_path_local
-            #os._exit(1)
+            if host_check:
+                print "ERROR, local host, ", self.local_host, ", is not part of cdtrace, ", cdtrace_path_local
+                os._exit(1)
+            else:
+                print "WARNING, local host: ", self.local_host, ", should be part of cdtrace: ", cdtrace_path_local, ". It is not. Continue at your own risk!"
         for host in self.hosts:
-            
+            #TEMP
             #NOt NEEDED?
             #generic_folder_path = cdtrace_path_local.replace(self.local_host, host)+"/hanasitter_temp_out/"
             #if os.path.isdir(generic_folder_path):
@@ -299,7 +303,6 @@ class HDBCONS:
             #subprocess.check_output("mkdir "+generic_folder_path, shell=True)
             #subprocess.check_output("chmod 777 "+generic_folder_path, shell=True)
             #self.temp_host_output_dirs.append(generic_folder_path+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+"/")
-            
             self.temp_host_output_dirs.append(cdtrace_path_local.replace(self.local_host, host)+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+"/")
         for path in self.temp_host_output_dirs:
             subprocess.check_output("mkdir "+path, shell=True)
@@ -400,7 +403,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
         print "INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information."
         os._exit(1)
 
@@ -911,6 +914,7 @@ def main():
     mail_server = None
     ssl = "false"
     virtual_local_host = "" #default: assume physical local host
+    host_check = "true"
     dbuserkey = 'SYSTEMKEY' # This KEY has to be maintained in hdbuserstore  
                             # so that   hdbuserstore LIST    gives e.g. 
                             # KEY SYSTEMKEY
@@ -1020,6 +1024,8 @@ def main():
                         ssl = flagValue
                     if firstWord == '-vlh':
                         virtual_local_host = flagValue
+                    if firstWord == '-hc': 
+                        host_check = flagValue
                     if firstWord == '-k': 
                         dbuserkey = flagValue
                     if firstWord == '-cpu': 
@@ -1103,6 +1109,8 @@ def main():
         ssl = sys.argv[sys.argv.index('-ssl') + 1]
     if '-vlh' in sys.argv:
         virtual_local_host = sys.argv[sys.argv.index('-vlh') + 1]
+    if '-hc' in sys.argv:
+        host_check = int(sys.argv[sys.argv.index('-hc') + 1])
     if '-k' in sys.argv:
         dbuserkey = sys.argv[sys.argv.index('-k') + 1]
     if '-cpu' in sys.argv:
@@ -1126,15 +1134,18 @@ def main():
         local_host_index = 0
     else:
         local_host_index = key_hosts.index(local_host)       
-        
+    ### host_check, -hc
+    host_check = checkAndConvertBooleanFlag(host_check, "-hc")
+
     key_sqlports = [env.split(':')[1] for env in ENV]    
     local_sqlport = key_sqlports[local_host_index]             
     dbinstances = [port[1:3] for port in key_sqlports]
     if not all(x == dbinstances[0] for x in dbinstances):
-        #TEMP
-        #print "ERROR: The hosts provided with the user key, "+dbuserkey+", do not all have the same instance number"
-        print "WARNING: The hosts provided with the user key, "+dbuserkey+", do not all have the same instance number. They should. Continue on your own risk!"
-        #os._exit(1)
+        if host_check:
+            print "ERROR: The hosts provided with the user key, "+dbuserkey+", do not all have the same instance number"
+            os._exit(1)
+        else:
+            print "WARNING: The hosts provided with the user key, "+dbuserkey+", do not all have the same instance number. They should. Continue on your own risk!"
     local_dbinstance = dbinstances[local_host_index]
     SID = subprocess.check_output('whoami', shell=True).replace('\n','').replace('adm','').upper()
     
@@ -1178,8 +1189,11 @@ def main():
     hosts_worker_and_standby_short = [host.split('.')[0] for host in hosts_worker_and_standby] # to deal with HSR and virtual host names (from Marco)
     for aHost in key_hosts:  #Check that hosts provided in hdbuserstore are correct
         if not aHost in hosts_worker_and_standby and not aHost.split('.')[0] in hosts_worker_and_standby_short and not aHost in ['localhost']:
-            print "ERROR: The host, "+aHost+", provided with the user key, "+dbuserkey+", is not one of the worker or standby hosts: ", hosts_worker_and_standby
-            os._exit(1)
+            if host_check:
+                print "ERROR: The host, "+aHost+", provided with the user key, "+dbuserkey+", is not one of the worker or standby hosts: ", hosts_worker_and_standby
+                os._exit(1)
+            else:
+                print "WARNING: The host, "+aHost+", provided with the user key, "+dbuserkey+", is not one of the worker or standby hosts: ", hosts_worker_and_standby
             
     ### HOST(S) USED BY THIS DB ###
     used_hosts = []
@@ -1496,7 +1510,7 @@ def main():
     kprofiler = KernelProfileSetting(num_kprofs, kprofs_interval, kprofs_duration, kprofs_wait)
     try:
         if num_kprofs: #only if we write kernel profiler dumps will we need temporary output folders
-            hdbcons.create_temp_output_directories() #create temporary output folders
+            hdbcons.create_temp_output_directories(host_check) #create temporary output folders
         while True: 
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
                 [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, minRetainedOutputDays, host_mode, comman, hdbcons)
