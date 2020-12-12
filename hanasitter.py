@@ -1098,7 +1098,7 @@ def main():
     if '-lf' in sys.argv:
         log_features = sys.argv[sys.argv.index('-lf') + 1]
     if '-so' in sys.argv:
-        std_out = int(sys.argv[sys.argv.index('-so') + 1])
+        std_out = sys.argv[sys.argv.index('-so') + 1]
     if '-en' in sys.argv:
         receiver_emails = [x for x in sys.argv[  sys.argv.index('-en') + 1   ].split(',')] 
     if '-ens' in sys.argv:
