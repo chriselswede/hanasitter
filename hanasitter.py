@@ -303,7 +303,9 @@ class HDBCONS:
             #subprocess.check_output("mkdir "+generic_folder_path, shell=True)
             #subprocess.check_output("chmod 777 "+generic_folder_path, shell=True)
             #self.temp_host_output_dirs.append(generic_folder_path+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+"/")
-            self.temp_host_output_dirs.append(cdtrace_path_local.replace(self.local_host, host)+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+"/")
+            #self.temp_host_output_dirs.append(cdtrace_path_local.replace(self.local_host, host)+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+"/")
+            #Let us try temp directories without time stamp, only date:
+            self.temp_host_output_dirs.append(cdtrace_path_local.replace(self.local_host, host)+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d")+"/")
         for path in self.temp_host_output_dirs:
             subprocess.check_output("mkdir "+path, shell=True)
             subprocess.check_output("chmod 777 "+path, shell=True)
