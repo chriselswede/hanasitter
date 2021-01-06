@@ -1101,7 +1101,7 @@ def main():
     if '-lf' in sys.argv:
         log_features = sys.argv[sys.argv.index('-lf') + 1]
     if '-so' in sys.argv:
-        std_out = int(sys.argv[sys.argv.index('-so') + 1])
+        std_out = sys.argv[sys.argv.index('-so') + 1]
     if '-en' in sys.argv:
         receiver_emails = [x for x in sys.argv[  sys.argv.index('-en') + 1   ].split(',')] 
     if '-ens' in sys.argv:
@@ -1113,7 +1113,7 @@ def main():
     if '-vlh' in sys.argv:
         virtual_local_host = sys.argv[sys.argv.index('-vlh') + 1]
     if '-hc' in sys.argv:
-        host_check = int(sys.argv[sys.argv.index('-hc') + 1])
+        host_check = sys.argv[sys.argv.index('-hc') + 1]
     if '-k' in sys.argv:
         dbuserkey = sys.argv[sys.argv.index('-k') + 1]
     if '-cpu' in sys.argv:
