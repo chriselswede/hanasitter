@@ -1126,6 +1126,7 @@ def main():
         print "ERROR, the key ", dbuserkey, " is not maintained in hdbuserstore."
         os._exit(1)
     ENV = key_environment.split('\n')[1].replace('  ENV : ','').replace(';',',').split(',')
+    DATABASE = key_environment.split('\n')[3].split('  DATABASE: ')[1]
     key_hosts = [env.split(':')[0] for env in ENV] 
     if not local_host in key_hosts and not 'localhost' in key_hosts:
         #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
@@ -1139,7 +1140,6 @@ def main():
         local_host_index = key_hosts.index(local_host)       
     ### host_check, -hc
     host_check = checkAndConvertBooleanFlag(host_check, "-hc")
-
     key_sqlports = [env.split(':')[1] for env in ENV]    
     local_sqlport = key_sqlports[local_host_index]             
     dbinstances = [port[1:3] for port in key_sqlports]
@@ -1151,22 +1151,21 @@ def main():
             print "WARNING: The hosts provided with the user key, "+dbuserkey+", do not all have the same instance number. They should. Continue on your own risk!"
     local_dbinstance = dbinstances[local_host_index]
     SID = subprocess.check_output('whoami', shell=True).replace('\n','').replace('adm','').upper()
-    
+
     ### MDC or not, SystemDB or Tenant ###    
     tenantIndexserverPorts = [] # First assume non-mdc, if it finds tenant ports then it is mdc 
-    output = subprocess.check_output('HDB info', shell=True).splitlines(1)   
+    output = subprocess.check_output('HDB info', shell=True).splitlines(1) 
     tenantIndexserverPorts = [line.split(' ')[-1].strip('\n') for line in output if "hdbindexserver -port" in line]
     tenantDBNames = [line.split(' ')[0].replace('adm','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated
     is_mdc = len(tenantIndexserverPorts) > 0
     output = subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock', shell=True).splitlines(1)
     nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
-    
+
     ### TENANT NAMES for NON HIGH-ISOLATED MDC ###
     if is_mdc:
         if tenantDBNames.count(tenantDBNames[0]) == len(tenantDBNames) and tenantDBNames[0] == SID:   # if all tenant names are equal and equal to SystemDB's SID, then it is non-high-isolation --> get tenant names using daemon instead
             [tenantDBNames, tenantIndexserverPorts] = tenant_names_and_ports(cdalias('cdhdb', local_dbinstance)+local_host+"/daemon.ini") # if non-high isolation the tenantIndexserverPorts from HDB info could be wrong order
 
-    
     ####### COMMUNICATION PORT (i.e. nameserver port if SystemDB at MDC, or indexserver port if TenantDB and if non-MDC) ########
     communicationPort = "-1"
     tenantDBName = None
@@ -1174,7 +1173,7 @@ def main():
     if is_mdc:
         for dbname, port in zip(tenantDBNames, tenantIndexserverPorts):
             testTenant = Tenant(dbname, port, local_dbinstance, SID)
-            if testTenant.sqlPort == int(local_sqlport):                           # then the sql port provided in hdbuserstore key is a tenant                   
+            if testTenant.sqlPort == int(local_sqlport) or testTenant.DBName == DATABASE:     # then the sql port provided in hdbuserstore key is a tenant, or we checking the database name                   
                 tenantDBName = testTenant.DBName
                 is_tenant = True
                 communicationPort = testTenant.getIndexserverPortString()          # indexserver port for the tenant
@@ -1185,7 +1184,7 @@ def main():
         if local_sqlport != "3"+local_dbinstance+"15":
             print "ERROR: The sqlport provided with the user key, "+dbuserkey+", is wrong. For non-MDC it must be 3<inst-nbr>15, but it is "+local_sqlport+".\nNOTE: MDC systems must show hdbindexserver -port when HDB info is executed, otherwise it is not supported by HANASitter."
             os._exit(1)
-            
+
     ### SCALE OUT or Single Host ###
     hosts_worker_and_standby = subprocess.check_output('sapcontrol -nr '+local_dbinstance+' -function GetSystemInstanceList', shell=True).splitlines(1)
     hosts_worker_and_standby = [line.split(',')[0] for line in hosts_worker_and_standby if ("HDB" in line or "HDB|HDB_WORKER" in line or "HDB|HDB_STANDBY" in line)] #Should we add HDB|HDB_XS_WORKER also?
@@ -1197,7 +1196,7 @@ def main():
                 os._exit(1)
             else:
                 print "WARNING: The host, "+aHost+", provided with the user key, "+dbuserkey+", is not one of the worker or standby hosts: ", hosts_worker_and_standby
-            
+
     ### HOST(S) USED BY THIS DB ###
     used_hosts = []
     for potential_host in hosts_worker_and_standby:        
