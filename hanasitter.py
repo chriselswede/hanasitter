@@ -640,9 +640,9 @@ def record_kprof(kprofiler, hdbcons, comman):   # SAP Note 1804811
     for hdbcon_string, host, tmp_dir in zip(hdbcons.hdbcons_strings, hdbcons.hosts, hdbcons.temp_host_output_dirs): 
         if host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
-            filename_cpu = ("kernel_profiler_cpu_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
-            filename_wait = ("kernel_profiler_wait_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
-            filename_kprof_log = ("kernel_profiler_output_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".log")
+            filename_cpu = ("kernel_profiler_cpu_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
+            filename_wait = ("kernel_profiler_wait_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
+            filename_kprof_log = ("kernel_profiler_output_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".log")
             start_time = datetime.now()
             os.system(hdbcon_string+'profiler clear" > '+out_dir+filename_kprof_log)
             os.system(hdbcon_string+'profiler start -w '+str(kprofiler.kprofs_wait)+'" > '+out_dir+filename_kprof_log)
@@ -668,7 +668,7 @@ def record_callstack(callstacks_interval, hdbcons, comman):
     for hdbcon_string, host in zip(hdbcons.hdbcons_strings, hdbcons.hosts):
         if host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
-            filename = (comman.out_dir+"/callstack_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
+            filename = (comman.out_dir+"/callstack_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
             start_time = datetime.now()
             os.system(hdbcon_string+'context list -s" > '+filename)
             stop_time = datetime.now()
