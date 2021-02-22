@@ -685,10 +685,10 @@ def record_rtedump(rtedumps_interval, hdbcons, comman):
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
             start_time = datetime.now()
             if hdbcons.rte_mode == 0: # normal rte dump
-                filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
                 os.system(hdbcon_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
             elif hdbcons.rte_mode == 1: # light rte dump 
-                filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
                 os.system(hdbcon_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
                 os.system(hdbcon_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
                 os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
