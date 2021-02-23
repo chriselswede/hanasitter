@@ -1126,7 +1126,10 @@ def main():
         print "ERROR, the key ", dbuserkey, " is not maintained in hdbuserstore."
         os._exit(1)
     ENV = key_environment.split('\n')[1].replace('  ENV : ','').replace(';',',').split(',')
-    DATABASE = key_environment.split('\n')[3].split('  DATABASE: ')[1]
+    if "DATABASE" in key_environment:
+        DATABASE = key_environment.split('\n')[3].split('  DATABASE: ')[1]
+    else:
+        DATABASE = ""
     key_hosts = [env.split(':')[0] for env in ENV] 
     if not local_host in key_hosts and not 'localhost' in key_hosts:
         #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
