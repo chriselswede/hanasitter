@@ -44,6 +44,9 @@ def printHelp():
     print('         default: ""                                                                                                                                ')
     print('         Note: <limit> should be an integer, or an integer preceded by < (for maximum allowed) or > (for minumum allowed)                           ')
     print('         Note: If you need a , in critical feature, please use \c instead, e.g. add_seconds(BLOCKED_TIME\c600)                                      ')
+    print(' -ct     critical feature text [list with comma separated strings], this list must be the same length as number of critical features, specified by  ')
+    print('         -cf and instead of a space there must be an underscore: _ . This text will be provided in the output (and in emails) when the              ')
+    print('         corresponding feature is critical.                                                                 default: [] (not used)                  ')
     print(' -cd     critical feature deliminiter mode, 1 = the deliminiter of -cf is ,  2 = the deliminiter of -cf is ;     default: 1 (backward compatible)   ')
     print('         Note: Sometimes it is needed to have a , in the SQL of the WHERE clause for -cf, e.g. ADD_SECONDS(CURRENT_TIME, -60), then use -cd 2       ')
     print(" -if     number checks and intervals of checks, every odd item of this list specifies how many times each feature check (see -cf) should be executed")
@@ -141,6 +144,12 @@ def printHelp():
     print("                                                                                                                                                    ")
     print("EXAMPLE (use -cd 2 to use ; as deliminiter of -cf instead of ,)                                                                                     ")
     print('''> python hanasitter.py -cf "M_SERVICE_THREADS;WHERE;IS_ACTIVE='TRUE' and SERVICE_NAME='indexserver';3" -nc 1 -cd 2                              ''')
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (if > 30 THREAD_STATE=Running, or if a configuration parameter was changed today, then a call stack will be dumped an email will be send    ")
+    print("         with dedicated text)                                                                                                                       ")
+    print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_STATE,Running,30,M_INIFILE_CONTENT_HISTORY,WHERE,TO_DATE(TIME)=CURRENT_DATE,0" -nc 1         ')
+    print('                         -ct "Too_many_running_threads,At_least_one_configuration_parameter_was_changed_today"                                      ')
+    print("                         -en chris@du.my -ens chris@comp.com -enm smtp.intra.comp.com                                                               ")
     print("                                                                                                                                                    ")
     print("EXAMPLE (reads a configuration file, but one flag will overwrite what is in the configuration file, i.e. there will be 3 callstacks instead of 2):  ")
     print("  > python hanasitter.py -ff /tmp/HANASitter/hanasitter_configfile.txt -nc 3                                                                        ")
@@ -327,6 +336,7 @@ class CommunicationManager:
         
 class CriticalFeature:
     def __init__(self, view, feature, value, limit, killSession = False):
+        self.text = ""
         self.view = view
         self.feature = feature
         self.maxRepeat = None
@@ -379,6 +389,8 @@ class CriticalFeature:
     def setIterations(self, iterations, interval):
         self.nbrIterations = iterations
         self.interval = interval
+    def setText(self, text):
+        self.text = text
         
 ######################## DEFINE FUNCTIONS ################################
 
@@ -406,7 +418,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
         print "INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information."
         os._exit(1)
 
@@ -817,8 +829,10 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                         log(printout, comman, sendEmail = hanging)
                     else: 
                         for host, nCFs  in nbrCFsPerHost[0].items():
-                            wrong_number_critical_features = (cf.limitIsMinimumNumberCFAllowed and nCFs < cf.limit) or (not cf.limitIsMinimumNumberCFAllowed and nCFs > cf.limit)    
+                            wrong_number_critical_features = (cf.limitIsMinimumNumberCFAllowed and nCFs < cf.limit) or (not cf.limitIsMinimumNumberCFAllowed and nCFs > cf.limit)
                             info_message = "# CFs = "+str(nCFs)+" for "+host+", "+cf.cfInfo
+                            if wrong_number_critical_features:
+                                info_message = info_message + "\n" + cf.text
                             printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_critical_features)+"       , "+info_message
                             log(printout, comman, sendEmail = wrong_number_critical_features)
                             if wrong_number_critical_features:
@@ -902,6 +916,7 @@ def main():
     feature_check_timeout = 60 #seconds
     #critical_features = ['M_SERVICE_THREADS','IS_ACTIVE','TRUE','30']  #one critical feature state with max allowed 30
     critical_features = [] # default: don't use critical feature check
+    cf_texts = [] # default: no text
     kill_session = [] # default: do not kill any session
     intervals_of_features = [] #default only one check per feature
     after_recorded = -1 #default: exits after recorded
@@ -999,6 +1014,8 @@ def main():
                             critical_features = [x.strip('"') for x in flagValue.split(';')]
                         else:
                             critical_features = [x.strip('"') for x in flagValue.split(',')]
+                    if firstWord == '-ct': 
+                        cf_texts = [x.strip('"') for x in flagValue.split(',')]
                     if firstWord == '-if': 
                         intervals_of_features = [x.strip('"') for x in flagValue.split(',')]
                     if firstWord == '-tf': 
@@ -1084,6 +1101,8 @@ def main():
             critical_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-cf') + 1   ].split(',')] 
         if critical_features == ['']:   # allow no critical feature with -cf ""
             critical_features = []      # make the length 0 in case of -cf ""
+    if '-ct' in sys.argv:
+        cf_texts = [x.strip('"') for x in sys.argv[  sys.argv.index('-ct') + 1   ].split(',')] 
     if '-if' in sys.argv:
         intervals_of_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-if') + 1   ].split(',')] 
     if '-tf' in sys.argv:
@@ -1369,6 +1388,14 @@ def main():
         os._exit(1)
     critical_features = [critical_features[i*4:i*4+4] for i in range(len(critical_features)/4)]
     critical_features = [CriticalFeature(cf[0], cf[1], cf[2], cf[3]) for cf in critical_features] #testing cf[3] is done in the class
+    ### cf_texts, -ct
+    if cf_texts:
+        if not len(cf_texts) == len(critical_features): 
+            log("INPUT ERROR: -ct must be a list with the length same as number of critical features. Please see --help for more information.", comman)
+            os._exit(1)
+        cf_texts = [ct.replace("_", ' ') for ct in cf_texts]
+        for i in range(len(critical_features)):
+            critical_features[i].setText(cf_texts[i])
     ### kill_session, -ks
     if kill_session:
         if not len(kill_session) == len(critical_features):
@@ -1434,7 +1461,7 @@ def main():
             if not is_email(senders_email):
                 log("INPUT ERROR: -ens is not an email. Please see --help for more information.", comman)
                 os._exit(1)
-    ### senders_email, -enm
+    ### mail_server, -enm
         if mail_server:
             if not receiver_emails:
                 log("INPUT ERROR: -enm is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
