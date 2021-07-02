@@ -58,15 +58,15 @@ def printHelp():
     print(" -lf     log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
     print(" -ci     check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
     print(" -ar     time to sleep after recording [seconds], if negative it exits, default: -1                                                                 ")
-    print("         *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps) ***                                             ")
+    print("         *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps and/or Output from Custom SQL) ***               ")
     print(" -rm     recording mode [1, 2 or 3], 1 = each requested recording types are done one after each other with the order above,                         ")
     print("                                         e.g. GStack 1, GStack 2, ..., GStack N, RTE 1, RTE 2, ..., RTE N   (this is default)                       ")
     print("                                     2 = the recordings of each requested recording types are done after each other with the                        ")
     print("                                         order above, e.g. GStack 1, RTE 1, Gstack 2, RTE 2, ...                                                    ")
     print("                                     3 = different recording types recorded in parallel threads, e.g. if 2 GStacks and 1 RTE                        ")
     print("                                         requested then GStack 1 and RTE 1 are parallel done, when both done GStack 2 starts                        ")
-    print(" -rp     recording priorities [list of 4 integers [1,4]] defines what order the recording modes will be executed for rm = 1 and rm = 2              ")
-    print("                                                         # 1 = RTE, # 2 = CallStacks, # 3 = GStacks, # 4 = Kernel Profiler, default: 1,2,3,4        ")
+    print(" -rp     recording priorities [list of 5 integers [1,5]] defines what order the recording modes will be executed for rm = 1 and rm = 2              ")
+    print("                                     # 1 = RTE, # 2 = CallStacks, # 3 = GStacks, # 4 = Kernel Profiler, # 5 = Custom SQL,       default: 1,2,3,4,5  ")
     print(" -hm     host mode [true/false], if true then all critical features are considered per host and the recording is done only for those hosts where    ")
     print("                                 the critical feature is above allowed limit per host, default: false                                               ")
     print("                                 Note: -hm is not supported for gstack (-ng), but for the other recording possibilities (-np, -nc, and -nr)         ")
@@ -85,13 +85,18 @@ def printHelp():
     print(" -ic     call stacks interval [seconds], for -rm = 1: time it waits between each call stack,                                                        ")
     print("                                         for -rm = 2: time it waits after a call stack,                                                             ")
     print("                                         for -rm = 3: time the thread waits after a call stack,  default: 60 seconds                                ")
-    print(" -nr     number rte dumps created if the DB is considered unresponsive: default: 0    (not used)                                                    ") 
+    print(" -nr     number rte dumps created if the DB is considered unresponsive, default: 0    (not used)                                                    ") 
     print("         Note: output is restricted to these folders /tmp, $HOME, $DIR_INSTANCE/work, and $SAP_RETRIEVAL_PATH                                       ")
     print(" -ir     rte dumps interval [seconds], for -rm = 1: time it waits between each rte dump,                                                            ")
     print("                                       for -rm = 2: time it waits after an rte dump,                                                                ")
     print("                                       for -rm = 3: time the thread waits after an rte dump,     default: 60 seconds                                ")
     print(" -mr     rte dump mode [0 or 1], -mr = 0: normal rte dump,                                                                                          ")
     print("                                 -mr = 1: light rte dump mode, only rte dump with STACK_SHORT and THREADS sections, and some M_ views,  default: 0  ")
+    print(" -ns     number custom sql outputs provided if the DB is considered unresponsive,  default: 0 (not used)                                            ")
+    print(" -is     custom sql interval [seconds], for -rm = 1: time it waits between each custom sql,                                                         ")
+    print("                                        for -rm = 2: time it waits after an custom sql,                                                             ")
+    print("                                        for -rm = 3: time the thread waits after an custom sql,     default: 60 seconds                             ")
+    print(" -cs     custom sql, this SELECT statement defines the output (see the -cs example below),     default: ''  (not used)                              ")
     print("         *** KILL SESSIONS (use with care!) ***                                                                                                     ")
     print(" -ks     kill session [list of true/false], list of booleans (length must be the same as number of features defined by -cf) that defines if -cf's   ")
     print("         features could indicate that the sessions (connections) are tried to be disconnected or not, default: None (not used)                      ")
@@ -164,6 +169,11 @@ def printHelp():
     print("                                  are recorded. This is the key in hdbuserstore that is used:                                                       ")
     print("                                  -k SYSTEMKEY                                                                                                      ")
     print("                                                                                                                                                    ")
+    print("EXAMPLE (if hana is unresponsible for over 10 seconds or if there are more than 500 active but not running threads, then the output dump of )       ")
+    print("         a certain custom made SELECT statement (here: SELECT on the view M_DEV_TRANSACTIONIS_HISTORY_ 4 hours back) is provided as a result file   ")
+    print('''> python hanasitter.py -k <key> -pt 10 -cf "M_SERVICE_THREADS,WHERE,IS_ACTIVE='TRUE' AND THREAD_STATE<>'Running',500"                           ''')
+    print('''  -ns 1 -cs "SELECT * from SYS.M_DEV_TRANSACTIONS_HISTORY_ WHERE PORT = '31003' AND START_TIME >= ADD_SECONDS (CURRENT_TIMESTAMP, -14400)"      ''')
+    print("                                                                                                                                                    ")
     print("CURRENT KNOWN LIMITATIONS (i.e. TODO LIST):                                                                                                         ")
     print(" 1. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                             ")
     print(" 2. If a CPU only happens on one Host, possible to record on only one Host --> not possible to do this with SAR                                     ")                                   
@@ -223,6 +233,12 @@ class KernelProfileSetting:
         self.kprofs_interval = kprofs_interval
         self.kprofs_duration = kprofs_duration
         self.kprofs_wait = kprofs_wait
+
+class CustomSQLSetting:
+    def __init__(self, num_custom_sql_recordings, custom_sql_interval, custom_sql_recording):
+        self.num_custom_sql_recordings = num_custom_sql_recordings
+        self.custom_sql_interval = custom_sql_interval
+        self.custom_sql_recording = custom_sql_recording
 
 class EmailNotification:
     def __init__(self, receiverEmails, senderEmail, mailServer, SID):
@@ -418,7 +434,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
         print "INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information."
         os._exit(1)
 
@@ -481,7 +497,7 @@ def is_number(s):
         return False
 
 def prio_def(prio_number):
-    prios = {1:"RTE", 2:"Call Stacks", 3:"G-Stacks", 4:"Kernel Profiler"}
+    prios = {1:"RTE", 2:"Call Stacks", 3:"G-Stacks", 4:"Kernel Profiler", 5:"Custom SQL"}
     return prios[prio_number]    
 
 def recording_prio_convert(recording_prio):
@@ -714,8 +730,23 @@ def record_rtedump(rtedumps_interval, hdbcons, comman):
             total_printout += printout
     time.sleep(rtedumps_interval)
     return total_printout 
- 
-def record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman):
+
+def record_customsql(customsql, hdbcons, comman):
+    tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
+    filename = comman.out_dir+"/custom_sql_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt"
+    customsql_output_file = open(filename, "a")
+    start_time = datetime.now()
+    customsql_output = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "'+customsql.custom_sql_recording+'"', shell=True)
+    customsql_output_file.write(customsql_output)   
+    customsql_output_file.flush()
+    customsql_output_file.close()
+    stop_time = datetime.now()
+    printout = "Custom SQL Record , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          ,   -        , "+filename 
+    log(printout, comman)
+    time.sleep(customsql.custom_sql_interval)
+    return printout 
+
+def record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman):
     if recording_mode == 1:
         for p in recording_prio:
             if p == 1:
@@ -730,6 +761,9 @@ def record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hd
             if p == 4:                    
                 for i in range(kprofiler.num_kprofs):    
                     record_kprof(kprofiler, hdbcons, comman)    
+            if p == 5:                    
+                for i in range(customsql.num_custom_sql_recordings):    
+                    record_customsql(customsql, hdbcons, comman)    
     elif recording_mode == 2:  
         max_nbr_recordings = max(gstack.num_gstacks, kprofiler.num_kprofs, callstack.num_callstacks, rte.num_rtedumps)
         for i in range(max_nbr_recordings):
@@ -746,14 +780,17 @@ def record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hd
                 if p == 4:    
                     if i < kprofiler.num_kprofs:
                         record_kprof(kprofiler, hdbcons, comman)
+                if p == 5:    
+                    if i < customsql.num_custom_sql_recordings:
+                        record_customsql(customsql, hdbcons, comman)
     else:
-        record_in_parallel(rte, callstack, gstack, kprofiler, hdbcons, comman)
+        record_in_parallel(rte, callstack, gstack, kprofiler, customsql, hdbcons, comman)
     return True
 
-def record_in_parallel(rte, callstack, gstack, kprofiler, hdbcons, comman):    
-    max_nbr_recordings = max(gstack.num_gstacks, kprofiler.num_kprofs, callstack.num_callstacks, rte.num_rtedumps)
+def record_in_parallel(rte, callstack, gstack, kprofiler, customsql, hdbcons, comman):    
+    max_nbr_recordings = max(gstack.num_gstacks, kprofiler.num_kprofs, callstack.num_callstacks, rte.num_rtedumps, customsql.num_custom_sql_recordings)
     for i in range(max_nbr_recordings):    
-        nbr_recording_types = sum(x > i for x in [rte.num_rtedumps, callstack.num_callstacks, gstack.num_gstacks, kprofiler.num_kprofs])
+        nbr_recording_types = sum(x > i for x in [rte.num_rtedumps, callstack.num_callstacks, gstack.num_gstacks, kprofiler.num_kprofs, customsql.num_custom_sql_recordings])
         pool = Pool(nbr_recording_types)  # need as many threads as number of recording types
         rec_types = []
         if rte.num_rtedumps > i:
@@ -764,6 +801,8 @@ def record_in_parallel(rte, callstack, gstack, kprofiler, hdbcons, comman):
             rec_types.append((3, gstack, hdbcons, comman))      # 3 = GStacks
         if kprofiler.num_kprofs > i:
             rec_types.append((4, kprofiler, hdbcons, comman))   # 4 = Kernel Profiler
+        if customsql.num_custom_sql_recordings > i:
+            rec_types.append((5, customsql, hdbcons, comman))   # 5 = Custom SQL
         results = pool.map(parallel_recording_wrapper, rec_types)
         if comman.std_out:
             for j in range(len(results)):
@@ -781,16 +820,18 @@ def parallel_recording(record_type, recorder, hdbcons, comman):
         return record_callstack(recorder.callstacks_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
     elif record_type == 3:
         return record_gstack(recorder.gstacks_interval, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
-    else:
+    elif record_type == 4:
         return record_kprof(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
+    else:
+        return record_customsql(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
 
-def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, minRetainedOutputDays, host_mode, comman, hdbcons):   
+def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, minRetainedOutputDays, host_mode, comman, hdbcons):   
     recorded = False
     offline = False
     while not recorded:
         # CPU CHECK
         if cpu_too_high(cpu_check_params, comman): #first check CPU with 'sar' (i.e. without contacting HANA) if it is too high, record without pinging or feature checking
-            recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
+            recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
         if not recorded:
             if ping_timeout != 0:   # possible to turn off PING check with -pt 0
                 # PING CHECK - to find either hanging or offline situations
@@ -805,7 +846,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                     comment = "DB responded faster than "+str(ping_timeout)+" seconds"
                 log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
                 if hanging:
-                    recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
+                    recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
                 if offline:
                     return [recorded, offline]    # exit the tracker if HANA turns offline during tracking
         if not recorded:
@@ -830,8 +871,8 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                     else: 
                         for host, nCFs  in nbrCFsPerHost[0].items():
                             wrong_number_critical_features = (cf.limitIsMinimumNumberCFAllowed and nCFs < cf.limit) or (not cf.limitIsMinimumNumberCFAllowed and nCFs > cf.limit)
-                            info_message = "# CFs = "+str(nCFs)+" for "+host+", "+cf.cfInfo
-                            if wrong_number_critical_features:
+                            info_message = "# CFs = "+str(nCFs)+" "+host+", "+cf.cfInfo
+                            if wrong_number_critical_features and cf.text:
                                 info_message = info_message + "\n" + cf.text
                             printout = "Feature Check "+str(chid)+"   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , "+str(not hanging)+"         , "+str(not wrong_number_critical_features)+"       , "+info_message
                             log(printout, comman, sendEmail = wrong_number_critical_features)
@@ -842,7 +883,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                     if hanging or len(hostsWithWrongNbrCFs):
                         if host_mode:
                             hdbcons.hostsForRecording = hostsWithWrongNbrCFs
-                        recorded = record(recording_mode, rte, callstack, gstack, kprofiler, recording_prio, hdbcons, comman)
+                        recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
                         if cf.killSession:
                             stop_session(cf, comman)
         if not recorded:
@@ -900,11 +941,14 @@ def main():
     ping_timeout = 60 #seconds
     check_interval = 60 #seconds
     recording_mode = 1 # either 1, 2 or 3
-    recording_prio = ['1', '2', '3', '4']   # 1=RTE, 2=CallStacks, 3=GStacks, 4=Kernel Profiler
+    recording_prio = ['1', '2', '3', '4', '5']   # 1=RTE, 2=CallStacks, 3=GStacks, 4=Kernel Profiler, 5=Custom SQL
     host_mode = "false"
     num_rtedumps = 0 #how many rtedumps?
     rtedumps_interval = 60 #seconds
     rte_mode = 0 # either 0 or 1 
+    num_custom_sql_recordings = 0  #how many custom sqls?
+    custom_sql_interval = 60 #seconds
+    custom_sql_recording = '' #custom sql dump
     num_callstacks = 0 #how many call stacks?
     callstacks_interval = 60 #seconds
     num_gstacks = 0  #how many call stacks?
@@ -988,6 +1032,12 @@ def main():
                         rtedumps_interval = flagValue
                     if firstWord == '-mr': 
                         rte_mode = flagValue
+                    if firstWord == '-ns': 
+                        num_custom_sql_recordings = flagValue
+                    if firstWord == '-ir': 
+                        custom_sql_interval = flagValue
+                    if firstWord == '-cs': 
+                        custom_sql_recording = flagValue
                     if firstWord == '-ks': 
                         kill_session = [x.strip('"') for x in flagValue.split(',')]
                     if firstWord == '-nc': 
@@ -1073,6 +1123,12 @@ def main():
         rtedumps_interval = sys.argv[sys.argv.index('-ir') + 1]
     if '-mr' in sys.argv:
         rte_mode = sys.argv[sys.argv.index('-mr') + 1]
+    if '-ns' in sys.argv:
+        num_custom_sql_recordings = sys.argv[sys.argv.index('-ns') + 1]
+    if '-is' in sys.argv:
+        custom_sql_interval = sys.argv[sys.argv.index('-is') + 1]
+    if '-cs' in sys.argv:
+        custom_sql_recording = sys.argv[sys.argv.index('-cs') + 1]
     if '-ks' in sys.argv:
         kill_session = [x.strip('"') for x in sys.argv[  sys.argv.index('-ks') + 1   ].split(',')] 
     if '-nc' in sys.argv:
@@ -1279,15 +1335,15 @@ def main():
         print "INPUT ERROR: The -rm flag must be either 1, 2, or 3. Please see --help for more information."
         os._exit(1)           
     ### recording_prio, -rp
-    if not len(recording_prio) == 4:
-        print "INPUT ERROR: The -rp flag must be followed by 4 items, seperated by comma. Please see --help for more information."
+    if not len(recording_prio) == 5:
+        print "INPUT ERROR: The -rp flag must be followed by 5 items, seperated by comma. Please see --help for more information."
         os._exit(1)
-    if not (recording_prio[0].isdigit() or recording_prio[1].isdigit() or recording_prio[2].isdigit() or recording_prio[3].isdigit()):
+    if not (recording_prio[0].isdigit() or recording_prio[1].isdigit() or recording_prio[2].isdigit() or recording_prio[3].isdigit() or recording_prio[4].isdigit()):
         print "INPUT ERROR: The -rp flag must be followed by positive integers, seperated by commas. Please see --help for more information."
         os._exit(1)
     recording_prio = [int(rec) for rec in recording_prio]
-    if not (recording_prio[0] in [1,2,3,4] or recording_prio[1] in [1,2,3,4] or recording_prio[2] in [1,2,3,4] or recording_prio[3] in [1,2,3,4]):
-        print "INPUT ERROR: The -rp flag must be followed by integers of the values withing [1-4]. Please see --help for more information."
+    if not (recording_prio[0] in [1,2,3,4,5] or recording_prio[1] in [1,2,3,4,5] or recording_prio[2] in [1,2,3,4,5] or recording_prio[3] in [1,2,3,4,5] or recording_prio[4] in [1,2,3,4,5]):
+        print "INPUT ERROR: The -rp flag must be followed by integers of the values withing [1-5]. Please see --help for more information."
         os._exit(1)     
     if [rec for rec in recording_prio if recording_prio.count(rec) > 1]:
         print "INPUT ERROR: The -rp flag must not contain dublicates. Please see --help for more information."
@@ -1320,8 +1376,26 @@ def main():
         os._exit(1)
     rte_mode = int(rte_mode)
     if not rte_mode in [0, 1]:
-        print "INPUT ERROR: The -mr flag must be either 0 or 1. Please see --help for more information."
-        os._exit(1)      
+        log("INPUT ERROR: The -mr flag must be either 0 or 1. Please see --help for more information.", comman)
+        os._exit(1)
+    ### num_custom_sql_recordings, -ns
+    if not is_integer(num_custom_sql_recordings):
+        log("INPUT ERROR: -ns must be an integer. Please see --help for more information.", comman)
+        os._exit(1)
+    num_custom_sql_recordings = int(num_custom_sql_recordings)
+    ### custom_sql_interval, -ir
+    if not is_integer(custom_sql_interval):
+        log("INPUT ERROR: -ir must be an integer. Please see --help for more information.", comman)
+        os._exit(1)
+    custom_sql_interval = int(custom_sql_interval)
+    ### custom_sql_recording, -cs
+    if custom_sql_recording:
+        if not num_custom_sql_recordings:
+            log("INPUT ERROR: The -cs flag specifies something allthough -ns is not. This makes no sense. Please see --help for more information.", comman)
+            os._exit(1)
+        if not custom_sql_recording[0:6].upper() == 'SELECT':
+            log('INPUT ERROR: The -cs flag must be a SELECT statement. Please see --help for more information.', comman) 
+            os._exit(1)
     ### num_callstacks, -nc
     if not is_integer(num_callstacks):
         log("INPUT ERROR: -nc must be an integer. Please see --help for more information.", comman)
@@ -1443,10 +1517,10 @@ def main():
     if (int(cpu_check_params[2]) > 0) and (int(cpu_check_params[0]) == 0):
         log("INPUT ERROR: If cpu checks with this intervall are to be done the cpu type cannot be zero. Please see --help for more information.", comman)
         os._exit(1)
-    ### num_rtedumps, -nr, num_callstacks, -nc, num_gstacks, -ng, num_kprofs, -np, log_features, -lf
+    ### num_rtedumps, -nr, num_callstacks, -nc, num_gstacks, -ng, num_kprofs, -np, num_custom_sql_recordings, -ns, log_features, -lf,
     if not kill_session:
-        if (num_rtedumps <= 0 and num_callstacks <= 0 and num_gstacks <= 0 and num_kprofs <= 0 and log_features == False):
-            log("INPUT ERROR: No kill-session and no recording is specified (-nr, -nc, -ng, and -np are all <= 0, or none of them are specified and -lf = false). It then makes no sense to run hanasitter. Please see --help for more information.", comman)
+        if (num_rtedumps <= 0 and num_callstacks <= 0 and num_gstacks <= 0 and num_kprofs <= 0 and num_custom_sql_recordings <= 0 and log_features == False):
+            log("INPUT ERROR: No kill-session and no recording is specified (-nr, -nc, -ng, -np, and -ns are all <= 0, or none of them are specified and -lf = false). It then makes no sense to run hanasitter. Please see --help for more information.", comman)
             os._exit(1)
     ### receiver_emails, -en
     if receiver_emails:
@@ -1521,6 +1595,9 @@ def main():
         log("RTE Dumps (normal)  , "+str(num_rtedumps)+"                   ,   "+str(rtedumps_interval)+"                  ,   ", comman)
     else: # change if more modes are added
         log("RTE Dumps (light)   , "+str(num_rtedumps)+"                   ,   "+str(rtedumps_interval)+"                  ,   ", comman)
+    log("Custom SQL          , "+str(num_custom_sql_recordings)+"                   ,   "+str(custom_sql_interval)+"                  ,   ", comman)
+    if custom_sql_recording:
+        log("Custom SQL: "+custom_sql_recording, comman)
     log("Recording Priority: "+recording_prio_convert(recording_prio), comman)
     if int(cpu_check_params[0]) > 0:
         if int(cpu_check_params[0]) == 1:
@@ -1540,12 +1617,13 @@ def main():
     callstack = CallStackSetting(num_callstacks, callstacks_interval)
     gstack = GStackSetting(num_gstacks, gstacks_interval)
     kprofiler = KernelProfileSetting(num_kprofs, kprofs_interval, kprofs_duration, kprofs_wait)
+    customsql = CustomSQLSetting(num_custom_sql_recordings, custom_sql_interval, custom_sql_recording)
     try:
         if num_kprofs: #only if we write kernel profiler dumps will we need temporary output folders
             hdbcons.create_temp_output_directories(host_check) #create temporary output folders
         while True: 
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
-                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, minRetainedOutputDays, host_mode, comman, hdbcons)
+                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, minRetainedOutputDays, host_mode, comman, hdbcons)
                 if recorded:
                     if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
                         hdbcons.clear()    #remove temporary output folders before exit
