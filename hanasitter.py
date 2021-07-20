@@ -438,14 +438,15 @@ def checkIfAcceptedFlag(word):
         print "INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information."
         os._exit(1)
 
-def is_online(dbinstance, comman):
+def is_online(dbinstance, comman): #Checks if all services are GREEN and if there exists an indexserver (if not this is a Stand-By) 
     process = subprocess.Popen(['sapcontrol', '-nr', dbinstance, '-function', 'GetProcessList'], stdout=subprocess.PIPE)
     out, err = process.communicate()
     number_services = out.count(" HDB ") + out.count(" Local Secure Store")   
     number_running_services = out.count("GREEN")
+    number_indexservers = int(out.count("hdbindexserver")) # if not indexserver this is Stand-By
     test_ok = (str(err) == "None")
-    result = number_running_services == number_services
-    printout = "Online Check      , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    ,     -            , "+str(test_ok)+"         , "+str(result)+"       , Number running services: "+str(number_running_services)+" out of "+str(number_services)
+    result = (number_running_services == number_services) and (number_indexservers != 0)
+    printout = "Online Check      , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    ,     -            , "+str(test_ok)+"         , "+str(result)+"       , # index services: "+str(number_indexservers)+", # running services: "+str(number_running_services)+" out of "+str(number_services)
     log(printout, comman)
     return result
     
@@ -457,7 +458,14 @@ def is_secondary(comman):
     printout = "Primary Check     , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    ,     -            , "+str(test_ok)+"         , "+str(not result)+"       , " 
     log(printout, comman)
     return result 
-    
+
+def is_multitenant_database_container(local_dbinstance):
+    is_mdc = False
+    global_ini = cdalias('cdcoc', local_dbinstance)+"/global.ini"
+    with open(global_ini) as gf:
+        is_mdc = 'mode = multidb' in gf.read()
+    return is_mdc
+
 def ping_db(comman, output):
     with open(os.devnull, 'w') as devnull:  # just to get no stdout in case HANA is offline
         try:
@@ -1210,7 +1218,7 @@ def main():
         #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
         #possible future masters in the hdbuserstore:   virt1:30413,virt3:30413,virt4:30413, so he executed HANASitter on virt2 with  -vlh virt2  --> worked fine
         # --> Instead of Error, just do Warning (consider to remove Warning...)
-        print "WARNING, local host, ", local_host, ", should be one of the hosts specified for the key. It is not, so will assume the SQL port of the first one. Continue on own risk!"
+        #print "WARNING, local host, ", local_host, ", should be one of the hosts specified for the key. It is not, so will assume the SQL port of the first one. Continue on own risk!"
         local_host_index = 0
     elif not local_host in key_hosts and 'localhost' in key_hosts:
         local_host_index = 0
@@ -1230,14 +1238,53 @@ def main():
     local_dbinstance = dbinstances[local_host_index]
     SID = subprocess.check_output('whoami', shell=True).replace('\n','').replace('adm','').upper()
 
-    ### MDC or not, SystemDB or Tenant ###    
-    tenantIndexserverPorts = [] # First assume non-mdc, if it finds tenant ports then it is mdc 
+    ############# OUTPUT DIRECTORIES #########
+    out_dir = out_dir.replace(" ","_")
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+    log_dir = log_dir.replace(" ","_")
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+ 
+    ############ CHECK AND CONVERT INPUT PARAMETERS FOR COMMUNICATION MANAGER and OLINE TEST ################     
+    log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with \n"+" ".join(sys.argv)+"\nas "+dbuserkey+": "+key_environment, CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))  
+    ### std_out, -so
+    std_out = checkAndConvertBooleanFlag(std_out, "-so")
+    ### ssl, -ssl
+    ssl = checkAndConvertBooleanFlag(ssl, "-ssl")
+    hdbsql_string = "hdbsql "
+    if ssl:
+        hdbsql_string = "hdbsql -e -ssltrustcert -sslcreatecert "
+    ### log_features, -lf
+    log_features = checkAndConvertBooleanFlag(log_features, "-lf")
+    if log_features and len(critical_features) == 0:
+        log("INPUT ERROR: -lf is True even though -cf is empty, i.e. no critical feature specified. This does not make sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        os._exit(1) 
+    ### online_test_interval, -oi  
+    if not is_integer(online_test_interval):
+        log("INPUT ERROR: -oi must be an integer. Please see --help for more information.", comman)
+        os._exit(1)
+    online_test_interval = int(online_test_interval)
+        
+    ############# COMMUNICATION MANAGER ##############
+    comman = CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features)   
+
+    ### First Online-Check ###
+    while not is_online(local_dbinstance, comman):
+        log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman)
+        time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
+
+    ### MDC or not, SystemDB or Tenant ### 
+    is_mdc = is_multitenant_database_container(local_dbinstance)
+    tenantIndexserverPorts = []  
     output = subprocess.check_output('HDB info', shell=True).splitlines(1) 
     tenantIndexserverPorts = [line.split(' ')[-1].strip('\n') for line in output if "hdbindexserver -port" in line]
-    tenantDBNames = [line.split(' ')[0].replace('adm','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated
-    is_mdc = len(tenantIndexserverPorts) > 0
+    tenantDBNames = [line.split(' ')[0].replace('adm','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated (below we get the names in case of low isolated)
     output = subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock', shell=True).splitlines(1)
     nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
+    if not tenantDBNames:
+        print "ERROR: Something went wrong, it passed online tests but still no tenant names were found."
+        os._exit(1)
 
     ### TENANT NAMES for NON HIGH-ISOLATED MDC ###
     if is_mdc:
@@ -1279,40 +1326,9 @@ def main():
     used_hosts = []
     for potential_host in hosts_worker_and_standby:        
         if '@'+communicationPort in subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+potential_host+'/lock', shell=True):
-            used_hosts.append(potential_host)
-
-    ############# OUTPUT DIRECTORIES #########
-    out_dir = out_dir.replace(" ","_")
-    if out_dir and not os.path.exists(out_dir):
-        os.makedirs(out_dir)
-    log_dir = log_dir.replace(" ","_")
-    if log_dir and not os.path.exists(log_dir):
-        os.makedirs(log_dir)
- 
-    ############ CHECK AND CONVERT INPUT PARAMETERS FOR COMMUNICATION MANAGER ################     
-    log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with \n"+" ".join(sys.argv)+"\nas "+dbuserkey+": "+key_environment, CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))  
-    ### std_out, -so
-    std_out = checkAndConvertBooleanFlag(std_out, "-so")
-    ### ssl, -ssl
-    ssl = checkAndConvertBooleanFlag(ssl, "-ssl")
-    hdbsql_string = "hdbsql "
-    if ssl:
-        hdbsql_string = "hdbsql -e -ssltrustcert -sslcreatecert "
-    ### log_features, -lf
-    log_features = checkAndConvertBooleanFlag(log_features, "-lf")
-    if log_features and len(critical_features) == 0:
-        log("INPUT ERROR: -lf is True even though -cf is empty, i.e. no critical feature specified. This does not make sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
-        os._exit(1) 
-        
-    ############# COMMUNICATION MANAGER ##############
-    comman = CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features)        
+            used_hosts.append(potential_host) 
         
     ############ CHECK AND CONVERT THE REST OF THE INPUT PARAMETERS ################
-    ### online_test_interval, -oi  
-    if not is_integer(online_test_interval):
-        log("INPUT ERROR: -oi must be an integer. Please see --help for more information.", comman)
-        os._exit(1)
-    online_test_interval = int(online_test_interval)
     ### ping_timeout, -pt
     if not is_integer(ping_timeout):
         log("INPUT ERROR: -pt must be an integer. Please see --help for more information.", comman)
