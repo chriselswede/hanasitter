@@ -1283,9 +1283,8 @@ def main():
     output = subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock', shell=True).splitlines(1)
     nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
     if not tenantDBNames:
-        print "ERROR: Something went wrong, it passed online tests but still no tenant names were found."
-        os._exit(1)
-
+        print "WARING: Something went wrong, it passed online tests but still no tenant names were found. Is this HANA 1? HANA 1 is not supported as of May 2021."
+        #os._exit(1)
     ### TENANT NAMES for NON HIGH-ISOLATED MDC ###
     if is_mdc:
         if tenantDBNames.count(tenantDBNames[0]) == len(tenantDBNames) and tenantDBNames[0] == SID:   # if all tenant names are equal and equal to SystemDB's SID, then it is non-high-isolation --> get tenant names using daemon instead
