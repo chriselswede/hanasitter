@@ -109,14 +109,16 @@ def printHelp():
     print(" -ol     log output directory, full path of the folder where HANASitter log files will end up (if the folder does not exist it will be created),    ")
     print("         default: '/tmp/hanasitter_output'   (i.e. same as for -od)                                                                                 ")
     print(" -olr    log retention days, hanasitterlogs in the path specified with -ol are only saved for this number of days, default: -1 (not used)           ")
+    print(" -oc     output configuration [true/false], logs all parameters set by the flags and where the flags were set, i.e. what flag file                  ")
+    print("         (one of the files listed in -ff) or if it was set via a flag specified on the command line, default = false                                ")
     print(" -en     email notification, <receiver 1's email>,<receiver 2's email>,... default:          (not used)                                             ") 
     print(" -ens    sender's email, to explicit specify sender's email address, only useful if -en if used, default:    (sender's email configured used)       ")
     print(" -enm    mail server, to explicit specify mail server, only useful if -en is used, default:     (mail server configured used)                       ")
     print('         NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  ')
     print("               sendmail.cf in /etc/mail/, see https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/           ")
     print(" -so     standard out switch [true/false], switch to write to standard out, default:  true                                                          ")
-    print(" -ff     flag file, full path to a file that contains input flags, each flag in a new line, all lines in the file that does not start with a        ")
-    print("         flag are considered comments, if this flag is used no other flags should be given, default: '' (not used)                                  ")
+    print(" -ff     flag file(s), a comma seperated list of full paths to a files that contain input flags, each flag in a new line, all lines in the file     ")
+    print("         that do not start with a flag (a minus) are considered comments, default: '' (not used)                                                    ")
     print(" -ssl    turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, default: false                                ") 
     print(" -vlh    virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")
     print(" -hc     host checking [true/false], checks if the host is the same as in cdtrace and provided in hdbuserkey, might be necessary to turn to false   ")
@@ -434,7 +436,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
         print "INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information."
         os._exit(1)
 
@@ -565,6 +567,31 @@ def tenant_names_and_ports(daemon_file):
                     os._exit(1)
         tenantIndexserverPorts = [first+second for first, second in zip(ports_first_halfs, ports_second_halfs)]
     return [tenantDBNames, tenantIndexserverPorts]
+
+def getParameterFromFile(flag, flag_string, flag_value, flag_file, flag_log, parameter):
+    if flag == flag_string:
+        parameter = flag_value
+        flag_log[flag_string] = [flag_value, flag_file]
+    return parameter
+
+def getParameterListFromFile(flag, flag_string, flag_value, flag_file, flag_log, parameter, delimeter = ','):
+    if flag == flag_string:
+        parameter = [x for x in flag_value.split(delimeter)]
+        flag_log[flag_string] = [flag_value, flag_file]
+    return parameter
+
+def getParameterFromCommandLine(sysargv, flag_string, flag_log, parameter):
+    if flag_string in sysargv:
+        flag_value = sysargv[sysargv.index(flag_string) + 1]
+        parameter = flag_value
+        flag_log[flag_string] = [flag_value, "command line"]
+    return parameter
+
+def getParameterListFromCommandLine(sysargv, flag_string, flag_log, parameter, delimeter = ','):
+    if flag_string in sysargv:
+        parameter = [x for x in sysargv[  sysargv.index(flag_string) + 1   ].split(delimeter)]
+        flag_log[flag_string] = [','.join(parameter), "command line"]
+    return parameter
 
 def cpu_too_high(cpu_check_params, comman):
     any_cpu_too_high = False
@@ -977,7 +1004,8 @@ def main():
     log_dir = "/tmp/hanasitter_output"
     minRetainedOutputDays = -1 #automatic cleanup of hanasitter output files
     minRetainedLogDays = -1 #automatic cleanup of hanasitterlog
-    flag_file = ""    #default: no configuration input file
+    out_config = "false"
+    flag_files = []    #default: no configuration input file
     log_features = "false"
     receiver_emails = None
     senders_email = None
@@ -1006,201 +1034,121 @@ def main():
                 os._exit(1)    
     
     
-    #####################   PRIMARY INPUT ARGUMENTS   ####################     
+    #####################   PRIMARY INPUT ARGUMENTS   #################### 
+    flag_log = {}    
     if '-h' in sys.argv or '--help' in sys.argv:
         printHelp()   
     if '-d' in sys.argv or '--disclaimer' in sys.argv:
         printDisclaimer() 
-    if '-ff' in sys.argv:
-        flag_file = sys.argv[sys.argv.index('-ff') + 1]
+    flag_files = getParameterListFromCommandLine(sys.argv, '-ff', flag_log, flag_files)
      
     ############ CONFIGURATION FILE ###################
-    if flag_file:
+    for flag_file in flag_files:
         with open(flag_file, 'r') as fin:
             for line in fin:
                 firstWord = line.strip(' ').split(' ')[0]  
                 if firstWord[0:1] == '-':
                     checkIfAcceptedFlag(firstWord)
                     flagValue = line.strip(' ').split('"')[1].strip('\n').strip('\r') if line.strip(' ').split(' ')[1][0] == '"' else line.strip(' ').split(' ')[1].strip('\n').strip('\r')
-                    if firstWord == '-oi':
-                        online_test_interval = flagValue
-                    if firstWord == '-pt': 
-                        ping_timeout = flagValue
-                    if firstWord == '-ci': 
-                        check_interval = flagValue
-                    if firstWord == '-rm': 
-                        recording_mode = flagValue
-                    if firstWord == '-rp': 
-                        recording_prio = [x for x in flagValue.split(',')]
-                    if firstWord == '-hm': 
-                        host_mode = flagValue
-                    if firstWord == '-nr': 
-                        num_rtedumps = flagValue
-                    if firstWord == '-ir': 
-                        rtedumps_interval = flagValue
-                    if firstWord == '-mr': 
-                        rte_mode = flagValue
-                    if firstWord == '-ns': 
-                        num_custom_sql_recordings = flagValue
-                    if firstWord == '-ir': 
-                        custom_sql_interval = flagValue
-                    if firstWord == '-cs': 
-                        custom_sql_recording = flagValue
-                    if firstWord == '-ks': 
-                        kill_session = [x.strip('"') for x in flagValue.split(',')]
-                    if firstWord == '-nc': 
-                        num_callstacks = flagValue
-                    if firstWord == '-ic': 
-                        callstacks_interval = flagValue
-                    if firstWord == '-ng': 
-                        num_gstacks = flagValue
-                    if firstWord == '-ig': 
-                        gstacks_interval = flagValue
-                    if firstWord == '-np': 
-                        num_kprofs = flagValue
-                    if firstWord == '-ip': 
-                        kprofs_interval = flagValue
-                    if firstWord == '-dp': 
-                        kprofs_duration = flagValue
-                    if firstWord == '-wp': 
-                        kprofs_wait = flagValue
+                    online_test_interval                = getParameterFromFile(firstWord, '-oi', flagValue, flag_file, flag_log, online_test_interval)
+                    ping_timeout                        = getParameterFromFile(firstWord, '-pt', flagValue, flag_file, flag_log, ping_timeout)
+                    check_interval                      = getParameterFromFile(firstWord, '-ci', flagValue, flag_file, flag_log, check_interval)
+                    recording_mode                      = getParameterFromFile(firstWord, '-rm', flagValue, flag_file, flag_log, recording_mode)
+                    recording_prio                      = getParameterListFromFile(firstWord, '-rp', flagValue, flag_file, flag_log, recording_prio)
+                    host_mode                           = getParameterFromFile(firstWord, '-hm', flagValue, flag_file, flag_log, host_mode)
+                    num_rtedumps                        = getParameterFromFile(firstWord, '-nr', flagValue, flag_file, flag_log, num_rtedumps)
+                    rtedumps_interval                   = getParameterFromFile(firstWord, '-ir', flagValue, flag_file, flag_log, rtedumps_interval)
+                    rte_mode                            = getParameterFromFile(firstWord, '-mr', flagValue, flag_file, flag_log, rte_mode)
+                    num_custom_sql_recordings           = getParameterFromFile(firstWord, '-ns', flagValue, flag_file, flag_log, num_custom_sql_recordings)
+                    custom_sql_interval                 = getParameterFromFile(firstWord, '-ir', flagValue, flag_file, flag_log, custom_sql_interval)
+                    custom_sql_recording                = getParameterFromFile(firstWord, '-cs', flagValue, flag_file, flag_log, custom_sql_recording)
+                    kill_session                        = getParameterListFromFile(firstWord, '-ks', flagValue, flag_file, flag_log, kill_session)
+                    num_callstacks                      = getParameterFromFile(firstWord, '-nc', flagValue, flag_file, flag_log, num_callstacks)
+                    callstacks_interval                 = getParameterFromFile(firstWord, '-ic', flagValue, flag_file, flag_log, callstacks_interval)
+                    num_gstacks                         = getParameterFromFile(firstWord, '-ng', flagValue, flag_file, flag_log, num_gstacks)
+                    gstacks_interval                    = getParameterFromFile(firstWord, '-ig', flagValue, flag_file, flag_log, gstacks_interval)
+                    num_kprofs                          = getParameterFromFile(firstWord, '-np', flagValue, flag_file, flag_log, num_kprofs)
+                    kprofs_interval                     = getParameterFromFile(firstWord, '-ip', flagValue, flag_file, flag_log, kprofs_interval)
+                    kprofs_duration                     = getParameterFromFile(firstWord, '-dp', flagValue, flag_file, flag_log, kprofs_duration)
+                    kprofs_wait                         = getParameterFromFile(firstWord, '-wp', flagValue, flag_file, flag_log, kprofs_wait)
                     cf_deliminiter_mode = '1' # default: deliminiter is , 
-                    if firstWord == '-cd': 
-                        cf_deliminiter_mode = flagValue
-                    if firstWord == '-cf': 
-                        if cf_deliminiter_mode == '2':
-                            critical_features = [x.strip('"') for x in flagValue.split(';')]
-                        else:
-                            critical_features = [x.strip('"') for x in flagValue.split(',')]
-                    if firstWord == '-ct': 
-                        cf_texts = [x.strip('"') for x in flagValue.split(',')]
-                    if firstWord == '-if': 
-                        intervals_of_features = [x.strip('"') for x in flagValue.split(',')]
-                    if firstWord == '-tf': 
-                        feature_check_timeout = flagValue
-                    if firstWord == '-ar': 
-                        after_recorded = flagValue
-                    if firstWord == '-od': 
-                        out_dir = flagValue
-                    if firstWord == '-odr':
-                        minRetainedOutputDays = flagValue
-                    if firstWord == '-ol': 
-                        log_dir = flagValue
-                    if firstWord == '-olr':
-                        minRetainedLogDays = flagValue
-                    if firstWord == '-lf': 
-                        log_features = flagValue
-                    if firstWord == '-en': 
-                        receiver_emails = [x for x in flagValue.split(',')]
-                    if firstWord == '-ens': 
-                        senders_email = flagValue
-                    if firstWord == '-enm': 
-                        mail_server = flagValue
-                    if firstWord == '-so': 
-                        std_out = flagValue
-                    if firstWord == '-ssl': 
-                        ssl = flagValue
-                    if firstWord == '-vlh':
-                        virtual_local_host = flagValue
-                    if firstWord == '-hc': 
-                        host_check = flagValue
-                    if firstWord == '-k': 
-                        dbuserkey = flagValue
-                    if firstWord == '-cpu': 
-                        cpu_check_params = [x for x in flagValue.split(',')]
+                    cf_deliminiter_mode                 = getParameterFromFile(firstWord, '-cd', flagValue, flag_file, flag_log, cf_deliminiter_mode)
+                    if cf_deliminiter_mode == '2':    
+                        critical_features               = getParameterListFromFile(firstWord, '-cf', flagValue, flag_file, flag_log, critical_features, ';')
+                    else:
+                        critical_features               = getParameterListFromFile(firstWord, '-cf', flagValue, flag_file, flag_log, critical_features)
+                    cf_texts                            = getParameterListFromFile(firstWord, '-ct', flagValue, flag_file, flag_log, cf_texts)
+                    intervals_of_features               = getParameterListFromFile(firstWord, '-if', flagValue, flag_file, flag_log, intervals_of_features)
+                    feature_check_timeout               = getParameterFromFile(firstWord, '-tf', flagValue, flag_file, flag_log, feature_check_timeout)
+                    after_recorded                      = getParameterFromFile(firstWord, '-ar', flagValue, flag_file, flag_log, after_recorded)
+                    out_dir                             = getParameterFromFile(firstWord, '-od', flagValue, flag_file, flag_log, out_dir)
+                    minRetainedOutputDays               = getParameterFromFile(firstWord, '-odr', flagValue, flag_file, flag_log, minRetainedOutputDays)
+                    log_dir                             = getParameterFromFile(firstWord, '-ol', flagValue, flag_file, flag_log, log_dir)
+                    minRetainedLogDays                  = getParameterFromFile(firstWord, '-olr', flagValue, flag_file, flag_log, minRetainedLogDays)
+                    out_config                          = getParameterFromFile(firstWord, '-oc', flagValue, flag_file, flag_log, out_config)
+                    log_features                        = getParameterFromFile(firstWord, '-lf', flagValue, flag_file, flag_log, log_features)
+                    receiver_emails                     = getParameterListFromFile(firstWord, '-en', flagValue, flag_file, flag_log, receiver_emails)
+                    senders_email                       = getParameterFromFile(firstWord, '-ens', flagValue, flag_file, flag_log, senders_email)
+                    mail_server                         = getParameterFromFile(firstWord, '-enm', flagValue, flag_file, flag_log, mail_server)
+                    std_out                             = getParameterFromFile(firstWord, '-so', flagValue, flag_file, flag_log, std_out)
+                    ssl                                 = getParameterFromFile(firstWord, '-ssl', flagValue, flag_file, flag_log, ssl)
+                    virtual_local_host                  = getParameterFromFile(firstWord, '-vlh', flagValue, flag_file, flag_log, virtual_local_host)
+                    host_check                          = getParameterFromFile(firstWord, '-hc', flagValue, flag_file, flag_log, host_check)
+                    dbuserkey                           = getParameterFromFile(firstWord, '-k', flagValue, flag_file, flag_log, dbuserkey)
+                    cpu_check_params                    = getParameterListFromFile(firstWord, '-cpu', flagValue, flag_file, flag_log, cpu_check_params)
      
     #####################   INPUT ARGUMENTS (these would overwrite whats in the configuration file)  #################### 
     for word in sys.argv:
         if word[0:1] == '-':
             checkIfAcceptedFlag(word)
-    if '-oi' in sys.argv:
-        online_test_interval = sys.argv[sys.argv.index('-oi') + 1]
-    if '-pt' in sys.argv:
-        ping_timeout = sys.argv[sys.argv.index('-pt') + 1]
-    if '-ci' in sys.argv:
-        check_interval = sys.argv[sys.argv.index('-ci') + 1]
-    if '-rm' in sys.argv:
-        recording_mode = sys.argv[sys.argv.index('-rm') + 1]
-    if '-rp' in sys.argv:
-        recording_prio = [x for x in sys.argv[  sys.argv.index('-rp') + 1   ].split(',')]
-    if '-hm' in sys.argv:
-        host_mode = sys.argv[sys.argv.index('-hm') + 1]
-    if '-nr' in sys.argv:
-        num_rtedumps = sys.argv[sys.argv.index('-nr') + 1]
-    if '-ir' in sys.argv:
-        rtedumps_interval = sys.argv[sys.argv.index('-ir') + 1]
-    if '-mr' in sys.argv:
-        rte_mode = sys.argv[sys.argv.index('-mr') + 1]
-    if '-ns' in sys.argv:
-        num_custom_sql_recordings = sys.argv[sys.argv.index('-ns') + 1]
-    if '-is' in sys.argv:
-        custom_sql_interval = sys.argv[sys.argv.index('-is') + 1]
-    if '-cs' in sys.argv:
-        custom_sql_recording = sys.argv[sys.argv.index('-cs') + 1]
-    if '-ks' in sys.argv:
-        kill_session = [x.strip('"') for x in sys.argv[  sys.argv.index('-ks') + 1   ].split(',')] 
-    if '-nc' in sys.argv:
-        num_callstacks = sys.argv[sys.argv.index('-nc') + 1]
-    if '-ic' in sys.argv:
-        callstacks_interval = sys.argv[sys.argv.index('-ic') + 1]
-    if '-ng' in sys.argv:
-        num_gstacks = sys.argv[sys.argv.index('-ng') + 1]
-    if '-ig' in sys.argv:
-        gstacks_interval = sys.argv[sys.argv.index('-ig') + 1]
-    if '-np' in sys.argv:
-        num_kprofs = sys.argv[sys.argv.index('-np') + 1]
-    if '-ip' in sys.argv:
-        kprofs_interval = sys.argv[sys.argv.index('-ip') + 1]
-    if '-dp' in sys.argv:
-        kprofs_duration = sys.argv[sys.argv.index('-dp') + 1]
-    if '-wp' in sys.argv:
-        kprofs_wait = sys.argv[sys.argv.index('-wp') + 1]
-    cf_deliminiter_mode = '1' # default: deliminiter is ,
-    if '-cd' in sys.argv:
-        cf_deliminiter_mode = sys.argv[sys.argv.index('-cd') + 1]
-    if '-cf' in sys.argv:
-        if cf_deliminiter_mode == '2':
-            critical_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-cf') + 1   ].split(';')]
+        online_test_interval                = getParameterFromCommandLine(sys.argv, '-oi', flag_log, online_test_interval)
+        ping_timeout                        = getParameterFromCommandLine(sys.argv, '-pt', flag_log, ping_timeout)
+        check_interval                      = getParameterFromCommandLine(sys.argv, '-ci', flag_log, check_interval)
+        recording_mode                      = getParameterFromCommandLine(sys.argv, '-rm', flag_log, recording_mode)
+        recording_prio                      = getParameterListFromCommandLine(sys.argv, '-rp', flag_log, recording_prio)
+        host_mode                           = getParameterFromCommandLine(sys.argv, '-hm', flag_log, host_mode)
+        num_rtedumps                        = getParameterFromCommandLine(sys.argv, '-nr', flag_log, num_rtedumps)
+        rtedumps_interval                   = getParameterFromCommandLine(sys.argv, '-ir', flag_log, rtedumps_interval)
+        rte_mode                            = getParameterFromCommandLine(sys.argv, '-mr', flag_log, rte_mode)
+        num_custom_sql_recordings           = getParameterFromCommandLine(sys.argv, '-ns', flag_log, num_custom_sql_recordings)
+        custom_sql_interval                 = getParameterFromCommandLine(sys.argv, '-ir', flag_log, custom_sql_interval)
+        custom_sql_recording                = getParameterFromCommandLine(sys.argv, '-cs', flag_log, custom_sql_recording)
+        kill_session                        = getParameterListFromCommandLine(firstWord, '-ks', flag_log, kill_session)
+        num_callstacks                      = getParameterFromCommandLine(sys.argv, '-nc', flag_log, num_callstacks)
+        callstacks_interval                 = getParameterFromCommandLine(sys.argv, '-ic', flag_log, callstacks_interval)
+        num_gstacks                         = getParameterFromCommandLine(sys.argv, '-ng', flag_log, num_gstacks)
+        gstacks_interval                    = getParameterFromCommandLine(sys.argv, '-ig', flag_log, gstacks_interval)
+        num_kprofs                          = getParameterFromCommandLine(sys.argv, '-np', flag_log, num_kprofs)
+        kprofs_interval                     = getParameterFromCommandLine(sys.argv, '-ip', flag_log, kprofs_interval)
+        kprofs_duration                     = getParameterFromCommandLine(sys.argv, '-dp', flag_log, kprofs_duration)
+        kprofs_wait                         = getParameterFromCommandLine(sys.argv, '-wp', flag_log, kprofs_wait)
+        cf_deliminiter_mode = '1' # default: deliminiter is , 
+        cf_deliminiter_mode                 = getParameterFromCommandLine(sys.argv, '-cd', flag_log, cf_deliminiter_mode)
+        if cf_deliminiter_mode == '2':    
+            critical_features               = getParameterListFromCommandLine(firstWord, '-cf', flag_log, critical_features, ';')
         else:
-            critical_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-cf') + 1   ].split(',')] 
+            critical_features               = getParameterListFromCommandLine(firstWord, '-cf', flag_log, critical_features)
         if critical_features == ['']:   # allow no critical feature with -cf ""
             critical_features = []      # make the length 0 in case of -cf ""
-    if '-ct' in sys.argv:
-        cf_texts = [x.strip('"') for x in sys.argv[  sys.argv.index('-ct') + 1   ].split(',')] 
-    if '-if' in sys.argv:
-        intervals_of_features = [x.strip('"') for x in sys.argv[  sys.argv.index('-if') + 1   ].split(',')] 
-    if '-tf' in sys.argv:
-        feature_check_timeout = sys.argv[sys.argv.index('-tf') + 1]
-    if '-ar' in sys.argv:
-        after_recorded = sys.argv[sys.argv.index('-ar') + 1]
-    if '-od' in sys.argv:
-        out_dir = sys.argv[sys.argv.index('-od') + 1]
-    if '-odr' in sys.argv:
-        minRetainedOutputDays = sys.argv[sys.argv.index('-odr') + 1]
-    if '-ol' in sys.argv:
-        log_dir = sys.argv[sys.argv.index('-ol') + 1]
-    if '-olr' in sys.argv:
-        minRetainedLogDays = sys.argv[sys.argv.index('-olr') + 1]
-    if '-lf' in sys.argv:
-        log_features = sys.argv[sys.argv.index('-lf') + 1]
-    if '-so' in sys.argv:
-        std_out = sys.argv[sys.argv.index('-so') + 1]
-    if '-en' in sys.argv:
-        receiver_emails = [x for x in sys.argv[  sys.argv.index('-en') + 1   ].split(',')] 
-    if '-ens' in sys.argv:
-        senders_email = sys.argv[sys.argv.index('-ens') + 1]
-    if '-enm' in sys.argv:
-        mail_server = sys.argv[sys.argv.index('-enm') + 1]
-    if '-ssl' in sys.argv:
-        ssl = sys.argv[sys.argv.index('-ssl') + 1]
-    if '-vlh' in sys.argv:
-        virtual_local_host = sys.argv[sys.argv.index('-vlh') + 1]
-    if '-hc' in sys.argv:
-        host_check = sys.argv[sys.argv.index('-hc') + 1]
-    if '-k' in sys.argv:
-        dbuserkey = sys.argv[sys.argv.index('-k') + 1]
-    if '-cpu' in sys.argv:
-        cpu_check_params = [x for x in sys.argv[  sys.argv.index('-cpu') + 1   ].split(',')]    
+        cf_texts                            = getParameterListFromCommandLine(firstWord, '-ct', flag_log, cf_texts)
+        intervals_of_features               = getParameterListFromCommandLine(firstWord, '-if', flag_log, intervals_of_features)
+        feature_check_timeout               = getParameterFromCommandLine(sys.argv, '-tf', flag_log, feature_check_timeout)
+        after_recorded                      = getParameterFromCommandLine(sys.argv, '-ar', flag_log, after_recorded)
+        out_dir                             = getParameterFromCommandLine(sys.argv, '-od', flag_log, out_dir)
+        minRetainedOutputDays               = getParameterFromCommandLine(sys.argv, '-odr', flag_log, minRetainedOutputDays)
+        log_dir                             = getParameterFromCommandLine(sys.argv, '-ol', flag_log, log_dir)
+        minRetainedLogDays                  = getParameterFromCommandLine(sys.argv, '-olr', flag_log, minRetainedLogDays)
+        out_config                          = getParameterFromCommandLine(sys.argv, '-oc', flag_log, out_config)
+        log_features                        = getParameterFromCommandLine(sys.argv, '-lf', flag_log, log_features)
+        receiver_emails                     = getParameterListFromCommandLine(firstWord, '-en', flag_log, receiver_emails)
+        senders_email                       = getParameterFromCommandLine(sys.argv, '-ens', flag_log, senders_email)
+        mail_server                         = getParameterFromCommandLine(sys.argv, '-enm', flag_log, mail_server)
+        std_out                             = getParameterFromCommandLine(sys.argv, '-so', flag_log, std_out)
+        ssl                                 = getParameterFromCommandLine(sys.argv, '-ssl', flag_log, ssl)
+        virtual_local_host                  = getParameterFromCommandLine(sys.argv, '-vlh', flag_log, virtual_local_host)
+        host_check                          = getParameterFromCommandLine(sys.argv, '-hc', flag_log, host_check)
+        dbuserkey                           = getParameterFromCommandLine(sys.argv, '-k', flag_log, dbuserkey)
+        cpu_check_params                    = getParameterListFromCommandLine(firstWord, '-cpu', flag_log, cpu_check_params)  
      
     ############ GET LOCAL HOST, LOCAL SQL PORT, LOCAL INSTANCE and SID ##########
     local_host = subprocess.check_output("hostname", shell=True).replace('\n','') if virtual_local_host == "" else virtual_local_host
@@ -1208,11 +1156,13 @@ def main():
     if "NOT FOUND" in key_environment:
         print "ERROR, the key ", dbuserkey, " is not maintained in hdbuserstore."
         os._exit(1)
-    ENV = key_environment.split('\n')[1].replace('  ENV : ','').replace(';',',').split(',')
     if "DATABASE" in key_environment:
         DATABASE = key_environment.split('\n')[3].split('  DATABASE: ')[1]
     else:
         DATABASE = ""
+    key_environment = key_environment.split('\n')
+    key_environment = [ke for ke in key_environment if ke and not ke == 'Operation succeed.']
+    ENV = key_environment[1].replace('  ENV : ','').replace(';',',').split(',')
     key_hosts = [env.split(':')[0] for env in ENV] 
     if not local_host in key_hosts and not 'localhost' in key_hosts:
         #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
@@ -1246,8 +1196,12 @@ def main():
     if log_dir and not os.path.exists(log_dir):
         os.makedirs(log_dir)
  
-    ############ CHECK AND CONVERT INPUT PARAMETERS FOR COMMUNICATION MANAGER and OLINE TEST ################     
-    log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with \n"+" ".join(sys.argv)+"\nas "+dbuserkey+": "+key_environment, CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))  
+    ############ CHECK AND CONVERT INPUT PARAMETERS FOR COMMUNICATION MANAGER and OLINE TEST ################ 
+    if out_config:
+        parameter_string = "\n".join("{}\t{}".format(k, "= "+v[0]+" from "+v[1]) for k, v in flag_log.items())
+        log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with\n"+parameter_string+"\nas "+dbuserkey+": "+'\n'.join(key_environment), CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))  
+    else:
+        log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with \n"+" ".join(sys.argv)+"\nas "+dbuserkey+": "+'\n'.join(key_environment), CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))  
     ### std_out, -so
     std_out = checkAndConvertBooleanFlag(std_out, "-so")
     ### ssl, -ssl
@@ -1471,6 +1425,8 @@ def main():
         log("INPUT ERROR: -olr must be an integer. Please see --help for more information.", comman)
         os._exit(1)
     minRetainedLogDays = int(minRetainedLogDays)
+    ### out_config, -oc
+    out_config = checkAndConvertBooleanFlag(out_config, "-oc")
     ### critical_features, -cf
     if len(critical_features)%4: # this also allow empty list in case just only ping check without feature check; -cf ""
         log("INPUT ERROR: -cf must be a list with the length of multiple of 4. Please see --help for more information.", comman)
