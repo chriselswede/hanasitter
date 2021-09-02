@@ -1196,7 +1196,9 @@ def main():
     if log_dir and not os.path.exists(log_dir):
         os.makedirs(log_dir)
  
-    ############ CHECK AND CONVERT INPUT PARAMETERS FOR COMMUNICATION MANAGER and OLINE TEST ################ 
+    ############ CHECK AND CONVERT INPUT PARAMETERS FOR COMMUNICATION MANAGER and OLINE TEST ################
+    ### out_config, -oc
+    out_config = checkAndConvertBooleanFlag(out_config, "-oc") 
     if out_config:
         parameter_string = "\n".join("{}\t{}".format(k, "= "+v[0]+" from "+v[1]) for k, v in flag_log.items())
         log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with\n"+parameter_string+"\nas "+dbuserkey+": "+'\n'.join(key_environment), CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))  
@@ -1425,8 +1427,6 @@ def main():
         log("INPUT ERROR: -olr must be an integer. Please see --help for more information.", comman)
         os._exit(1)
     minRetainedLogDays = int(minRetainedLogDays)
-    ### out_config, -oc
-    out_config = checkAndConvertBooleanFlag(out_config, "-oc")
     ### critical_features, -cf
     if len(critical_features)%4: # this also allow empty list in case just only ping check without feature check; -cf ""
         log("INPUT ERROR: -cf must be a list with the length of multiple of 4. Please see --help for more information.", comman)
