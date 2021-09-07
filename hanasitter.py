@@ -159,11 +159,10 @@ def printHelp():
     print('''  SECONDS_BETWEEN(TO_TIMESTAMP(START_TIME,'YYYY-MM-DD HH24:MI:SS.FF7'),CURRENT_TIMESTAMP)<300;>2" -cd 2 -en christian.hansen01@sap.com          ''')
     print('''  -ct "The_last_deltamerge_on_the_two_tables_are_older_than_5_min" -nc 1 -k T1KEY")                                                             ''')
     print("                                                                                                                                                    ")
-    print("EXAMPLE (if > 30 THREAD_STATE=Running, or if a configuration parameter was changed today, then a call stack will be dumped an email will be send    ")
+    print("EXAMPLE (if > 30 THREAD_STATE=Running, or if a configuration parameter was changed today, then a call stack will be dumped and an email will be send")
     print("         with dedicated text)                                                                                                                       ")
     print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_STATE,Running,30,M_INIFILE_CONTENT_HISTORY,WHERE,TO_DATE(TIME)=CURRENT_DATE,0" -nc 1         ')
-    print('                         -ct "Too_many_running_threads,At_least_one_configuration_parameter_was_changed_today"                                      ')
-    print("                         -en chris@du.my -ens chris@comp.com -enm smtp.intra.comp.com                                                               ")
+    print('                         -ct "Too_many_running_threads,At_least_one_configuration_parameter_was_changed_today" -en chris@du.my                      ')                                                  ")
     print("                                                                                                                                                    ")
     print("EXAMPLE (reads a configuration file, but one flag will overwrite what is in the configuration file, i.e. there will be 3 callstacks instead of 2):  ")
     print("  > python hanasitter.py -ff /tmp/HANASitter/hanasitter_configfile.txt -nc 3                                                                        ")
@@ -963,7 +962,6 @@ def log(message, comman, file_name = "", sendEmail = False):
     logfile.close()
     global emailNotification
     if sendEmail and emailNotification:  #sends email IF this call of log() wants it AND IF -en flag has been specified        
-        #MAILX (https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/):
         message = 'Hi Team, \nAn odd event reported on the server. Here below are the details:\n'+message
         mailstring = 'echo "'+message+'" | '+emailNotification.emailClient+' -s "Message from HANASitter about '+emailNotification.SID+'" '
         if emailNotification.mailServer:
@@ -1510,27 +1508,27 @@ def main():
             log("INPUT ERROR: some element(s) of -en is/are not email(s). Please see --help for more information.", comman)
             os._exit(1)
     ### email_client, -enc
-        if email_client:
-            if not receiver_emails:
-                log("INPUT ERROR: -enc is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
-                os._exit(1)
-            if email_client not in ['mailx', 'mail', 'mutt']:
-                print "INPUT ERROR: The -enc flag does not specify any of the email clients mailx, mail, or mutt. If you are using another email client that can send emails with the command "
-                print '             <message> | <client> -s "<subject>" \n please let me know.'
-                os._exit(1)
+    if email_client:
+        if not receiver_emails:
+            log("INPUT ERROR: -enc is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
+            os._exit(1)
+        if email_client not in ['mailx', 'mail', 'mutt']:
+            print "INPUT ERROR: The -enc flag does not specify any of the email clients mailx, mail, or mutt. If you are using another email client that can send emails with the command "
+            print '             <message> | <client> -s "<subject>" \n please let me know.'
+            os._exit(1)
     ### senders_email, -ens
-        if senders_email:
-            if not receiver_emails:
-                log("INPUT ERROR: -ens is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
-                os._exit(1)
-            if not is_email(senders_email):
-                log("INPUT ERROR: -ens is not an email. Please see --help for more information.", comman)
-                os._exit(1)
+    if senders_email:
+        if not receiver_emails:
+            log("INPUT ERROR: -ens is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
+            os._exit(1)
+        if not is_email(senders_email):
+            log("INPUT ERROR: -ens is not an email. Please see --help for more information.", comman)
+            os._exit(1)
     ### mail_server, -enm
-        if mail_server:
-            if not receiver_emails:
-                log("INPUT ERROR: -enm is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
-                os._exit(1)
+    if mail_server:
+        if not receiver_emails:
+            log("INPUT ERROR: -enm is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
+            os._exit(1)
 
     ############# EMAIL NOTIFICATION ##############
     if receiver_emails:
