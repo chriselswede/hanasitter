@@ -111,9 +111,10 @@ def printHelp():
     print(" -olr    log retention days, hanasitterlogs in the path specified with -ol are only saved for this number of days, default: -1 (not used)           ")
     print(" -oc     output configuration [true/false], logs all parameters set by the flags and where the flags were set, i.e. what flag file                  ")
     print("         (one of the files listed in -ff) or if it was set via a flag specified on the command line, default = false                                ")
-    print(" -en     email notification, <receiver 1's email>,<receiver 2's email>,... default:          (not used)                                             ") 
-    print(" -ens    sender's email, to explicit specify sender's email address, only useful if -en if used, default:    (sender's email configured used)       ")
-    print(" -enm    mail server, to explicit specify mail server, only useful if -en is used, default:     (mail server configured used)                       ")
+    print(" -en     email notification, <receiver 1's email>,<receiver 2's email>,... default:          (not used)                                             ")
+    print(" -enc    email client, to explicitly specify the email client (e.g mail, mailx, mutt, ...,), only useful if -en if used, default: mailx             ") 
+    print(" -ens    sender's email, to explicitly specify sender's email address, only useful if -en if used, default:    (sender's email configured used)     ")
+    print(" -enm    mail server, to explicitly specify mail server, only useful if -en is used, default:                  (mail server configured used)        ")
     print('         NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  ')
     print("               sendmail.cf in /etc/mail/, see https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/           ")
     print(" -so     standard out switch [true/false], switch to write to standard out, default:  true                                                          ")
@@ -151,6 +152,12 @@ def printHelp():
     print("                                                                                                                                                    ")
     print("EXAMPLE (use -cd 2 to use ; as deliminiter of -cf instead of ,)                                                                                     ")
     print('''> python hanasitter.py -cf "M_SERVICE_THREADS;WHERE;IS_ACTIVE='TRUE' and SERVICE_NAME='indexserver';3" -nc 1 -cd 2                              ''')
+    print("                                                                                                                                                    ")
+    print("EXAMPLE (if at least one of the two tables didn't have a delta merge started at least 5 minutes ago,                                                ")
+    print("         an email will be send and a call stack will be written)                                                                                    ")
+    print('''> python hanasitter.py -cf "M_DELTA_MERGE_STATISTICS;WHERE;SCHEMA_NAME = 'DMM260' and TABLE_NAME in ('QUALITY', 'TESTSCORES') and               ''')
+    print('''  SECONDS_BETWEEN(TO_TIMESTAMP(START_TIME,'YYYY-MM-DD HH24:MI:SS.FF7'),CURRENT_TIMESTAMP)<300;>2" -cd 2 -en christian.hansen01@sap.com          ''')
+    print('''  -ct "The_last_deltamerge_on_the_two_tables_are_older_than_5_min" -nc 1 -k T1KEY")                                                             ''')
     print("                                                                                                                                                    ")
     print("EXAMPLE (if > 30 THREAD_STATE=Running, or if a configuration parameter was changed today, then a call stack will be dumped an email will be send    ")
     print("         with dedicated text)                                                                                                                       ")
@@ -243,12 +250,14 @@ class CustomSQLSetting:
         self.custom_sql_recording = custom_sql_recording
 
 class EmailNotification:
-    def __init__(self, receiverEmails, senderEmail, mailServer, SID):
+    def __init__(self, receiverEmails, emailClient, senderEmail, mailServer, SID):
         self.senderEmail = senderEmail
+        self.emailClient = emailClient
         self.receiverEmails = receiverEmails
         self.mailServer = mailServer
         self.SID = SID
     def printEmailNotification(self):
+        print "Email Client: ", self.emailClient
         if self.senderEmail:
             print "Sender Email: ", self.senderEmail
         else:
@@ -436,7 +445,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-lf", "-en", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
         print "INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information."
         os._exit(1)
 
@@ -956,13 +965,12 @@ def log(message, comman, file_name = "", sendEmail = False):
     if sendEmail and emailNotification:  #sends email IF this call of log() wants it AND IF -en flag has been specified        
         #MAILX (https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/):
         message = 'Hi Team, \nAn odd event reported on the server. Here below are the details:\n'+message
-        mailstring = 'echo "'+message+'" | mailx -s "Message from HANASitter about '+emailNotification.SID+'" '
+        mailstring = 'echo "'+message+'" | '+emailNotification.emailClient+' -s "Message from HANASitter about '+emailNotification.SID+'" '
         if emailNotification.mailServer:
             mailstring += ' -S smtp=smtp://'+emailNotification.mailServer+' '
         if emailNotification.senderEmail:
             mailstring += ' -S from="'+emailNotification.senderEmail+'" '
         mailstring += ",".join(emailNotification.receiverEmails)
-        #print mailstring
         output = subprocess.check_output(mailstring, shell=True)
     
 def main():
@@ -1008,6 +1016,7 @@ def main():
     flag_files = []    #default: no configuration input file
     log_features = "false"
     receiver_emails = None
+    email_client = 'mailx'   #default email client
     senders_email = None
     mail_server = None
     ssl = "false"
@@ -1088,6 +1097,7 @@ def main():
                     out_config                          = getParameterFromFile(firstWord, '-oc', flagValue, flag_file, flag_log, out_config)
                     log_features                        = getParameterFromFile(firstWord, '-lf', flagValue, flag_file, flag_log, log_features)
                     receiver_emails                     = getParameterListFromFile(firstWord, '-en', flagValue, flag_file, flag_log, receiver_emails)
+                    email_client                        = getParameterFromFile(firstWord, '-enc', flagValue, flag_file, flag_log, email_client)
                     senders_email                       = getParameterFromFile(firstWord, '-ens', flagValue, flag_file, flag_log, senders_email)
                     mail_server                         = getParameterFromFile(firstWord, '-enm', flagValue, flag_file, flag_log, mail_server)
                     std_out                             = getParameterFromFile(firstWord, '-so', flagValue, flag_file, flag_log, std_out)
@@ -1141,6 +1151,7 @@ def main():
     out_config                          = getParameterFromCommandLine(sys.argv, '-oc', flag_log, out_config)
     log_features                        = getParameterFromCommandLine(sys.argv, '-lf', flag_log, log_features)
     receiver_emails                     = getParameterListFromCommandLine(sys.argv, '-en', flag_log, receiver_emails)
+    email_client                        = getParameterFromCommandLine(sys.argv, '-enc', flag_log, email_client)
     senders_email                       = getParameterFromCommandLine(sys.argv, '-ens', flag_log, senders_email)
     mail_server                         = getParameterFromCommandLine(sys.argv, '-enm', flag_log, mail_server)
     std_out                             = getParameterFromCommandLine(sys.argv, '-so', flag_log, std_out)
@@ -1498,6 +1509,15 @@ def main():
         if any(not is_email(element) for element in receiver_emails):
             log("INPUT ERROR: some element(s) of -en is/are not email(s). Please see --help for more information.", comman)
             os._exit(1)
+    ### email_client, -enc
+        if email_client:
+            if not receiver_emails:
+                log("INPUT ERROR: -enc is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
+                os._exit(1)
+            if email_client not in ['mailx', 'mail', 'mutt']:
+                print "INPUT ERROR: The -enc flag does not specify any of the email clients mailx, mail, or mutt. If you are using another email client that can send emails with the command "
+                print '             <message> | <client> -s "<subject>" \n please let me know.'
+                os._exit(1)
     ### senders_email, -ens
         if senders_email:
             if not receiver_emails:
@@ -1515,7 +1535,7 @@ def main():
     ############# EMAIL NOTIFICATION ##############
     if receiver_emails:
         global emailNotification
-        emailNotification = EmailNotification(receiver_emails, senders_email, mail_server, SID)
+        emailNotification = EmailNotification(receiver_emails, email_client, senders_email, mail_server, SID)
 
     ### FILL HDBCONS STRINGS ###
     hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName)
