@@ -162,7 +162,7 @@ def printHelp():
     print("EXAMPLE (if > 30 THREAD_STATE=Running, or if a configuration parameter was changed today, then a call stack will be dumped and an email will be send")
     print("         with dedicated text)                                                                                                                       ")
     print('  > python hanasitter.py -cf "M_SERVICE_THREADS,THREAD_STATE,Running,30,M_INIFILE_CONTENT_HISTORY,WHERE,TO_DATE(TIME)=CURRENT_DATE,0" -nc 1         ')
-    print('                         -ct "Too_many_running_threads,At_least_one_configuration_parameter_was_changed_today" -en chris@du.my                      ')                                                  ")
+    print('                         -ct "Too_many_running_threads,At_least_one_configuration_parameter_was_changed_today" -en chris@du.my                      ')
     print("                                                                                                                                                    ")
     print("EXAMPLE (reads a configuration file, but one flag will overwrite what is in the configuration file, i.e. there will be 3 callstacks instead of 2):  ")
     print("  > python hanasitter.py -ff /tmp/HANASitter/hanasitter_configfile.txt -nc 3                                                                        ")
@@ -1014,7 +1014,7 @@ def main():
     flag_files = []    #default: no configuration input file
     log_features = "false"
     receiver_emails = None
-    email_client = 'mailx'   #default email client
+    email_client = ''   #default email client, mailx, will be specifed later if -enc not provided
     senders_email = None
     mail_server = None
     ssl = "false"
@@ -1512,6 +1512,9 @@ def main():
         if not receiver_emails:
             log("INPUT ERROR: -enc is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
             os._exit(1)
+    if receiver_emails:
+        if not email_client:
+            email_client = 'mailx'
         if email_client not in ['mailx', 'mail', 'mutt']:
             print "INPUT ERROR: The -enc flag does not specify any of the email clients mailx, mail, or mutt. If you are using another email client that can send emails with the command "
             print '             <message> | <client> -s "<subject>" \n please let me know.'
