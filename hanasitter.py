@@ -1489,7 +1489,13 @@ def main():
     if len(critical_features)%4: # this also allow empty list in case just only ping check without feature check; -cf ""
         log("INPUT ERROR: -cf must be a list with the length of multiple of 4. Please see --help for more information.", comman)
         os._exit(1)
-    critical_features = [critical_features[i*4:i*4+4] for i in range(len(critical_features)//4)]   # // is "integer division" in Python 3
+    if sys.version_info[0] == 2:
+        critical_features = [critical_features[i*4:i*4+4] for i in range(len(critical_features)/4)]    # / is integer division in Python 2
+    elif sys.version_info[0] == 3:
+        critical_features = [critical_features[i*4:i*4+4] for i in range(len(critical_features)//4)]   # // is "integer division" in Python 3
+    else:
+        print("ERROR: Wrong Python version")
+        os._exit(1)    
     critical_features = [CriticalFeature(cf[0], cf[1], cf[2], cf[3]) for cf in critical_features] #testing cf[3] is done in the class
     ### cf_texts, -ct
     if cf_texts:
