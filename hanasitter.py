@@ -1676,6 +1676,9 @@ def main():
                         hdbcons.clear()    #remove temporary output folders before exit
                         sys.exit()
                     time.sleep(float(after_recorded))  # after recorded call stacks and/or rte dumps it sleeps a bit and then continues tracking if HANA is online
+                if offline:
+                    log("\nDuring the tracking hana turned offline. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman)
+                    time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
             else:
                 log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman)
                 time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
