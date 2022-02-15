@@ -1277,8 +1277,10 @@ def main():
     comman = CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features)   
 
     ### First Online-Check ###
+    wasOnline = True
     while not is_online(local_dbinstance, comman):
-        log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman, sendEmail = True)
+        log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman, sendEmail = wasOnline)
+        wasOnline = False
         time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
 
     ### MDC or not, SystemDB or Tenant ### 
@@ -1668,8 +1670,10 @@ def main():
     try:
         if num_kprofs: #only if we write kernel profiler dumps will we need temporary output folders
             hdbcons.create_temp_output_directories(host_check) #create temporary output folders
+        wasOnline = True
         while True: 
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
+                wasOnline = True
                 [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons)
                 if recorded:
                     if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
@@ -1680,7 +1684,8 @@ def main():
                     log("\nDuring the tracking hana turned offline. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman, sendEmail = True)
                     time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
             else:
-                log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman, sendEmail = True)
+                log("\nOne of the online checks found out that this HANA instance is not online. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman, sendEmail = wasOnline)
+                wasOnline = False
                 time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
     #except:           
     except Exception as e:
