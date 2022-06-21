@@ -10,14 +10,15 @@ ANY USAGE OF HANASITTER ASSUMES THAT YOU HAVE UNDERSTOOD AND AGREED THAT:
 2. HANASitter is open source   
 3. HANASitter is provided "as is"  
 4. HANASitter is to be used on "your own risk"  
-5. HANASitter is a one-man's hobby (developed, maintained and supported only during non-working hours)   
+5. HANASitter is a one-man's hobby (developed, maintained and supported only during non-working hours)  
+6. HANASitter expects "default" HANA environment with no modifications done in the .bashrc or other files 
 
-6. All HANASitter documentations have to be read and understood before any usage:    
+7. All HANASitter documentations have to be read and understood before any usage:    
     * SAP Note [2399979](https://launchpad.support.sap.com/#/notes/2399979)   
     * The .pdf file hanasitter.pdf    
     * All output from executing     `python hanasitter.py --help`    
     
-7. HANASitter can help you to automize certain monitoring tasks but is not an attempt to teach you how to monitor SAP HANA  
+8. HANASitter can help you to automize certain monitoring tasks but is not an attempt to teach you how to monitor SAP HANA  
 I.e. if you do not know what you want to do, HANASitter cannot help, but if you do know, HANASitter can automitize it    
    
-8. HANASitter is not providing any recommendations, all flags shown in the documentation (see point 6.) are only examples
+9. HANASitter is not providing any recommendations, all flags shown in the documentation (see point 6.) are only examples
