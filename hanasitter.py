@@ -1217,8 +1217,9 @@ def main():
     if not local_host in key_hosts and not 'localhost' in key_hosts:
         #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
         #possible future masters in the hdbuserstore:   virt1:30413,virt3:30413,virt4:30413, so he executed HANASitter on virt2 with  -vlh virt2  --> worked fine
-        # --> Instead of Error, just do Warning (consider to remove Warning...)
-        #print "WARNING, local host, ", local_host, ", should be one of the hosts specified for the key. It is not, so will assume the SQL port of the first one. Continue on own risk!"
+        # --> Instead of Error, just do Warning if -vlh is not used
+        if not virtual_local_host:
+            print("WARNING, local host, ", local_host, ", should be one of the hosts specified for the key. It is not, so will assume the SQL port of the first one. Continue on own risk!")
         local_host_index = 0
     elif not local_host in key_hosts and 'localhost' in key_hosts:
         local_host_index = 0
@@ -1292,10 +1293,8 @@ def main():
     tenantIndexserverPorts = [line.split(' ')[-1].strip('\n') for line in output if "hdbindexserver -port" in line]
     tenantDBNames = [line.split(' ')[0].replace('adm','').replace('usr','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated (below we get the names in case of low isolated)
     #output = subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock', shell=True).splitlines(1)   
-
     output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock').splitlines(1)
     nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
-
     if not tenantDBNames:
         print("WARNING: Something went wrong, it passed online tests but still no tenant names were found. Is this HANA 1? HANA 1 is not supported as of May 2021.")
         #os._exit(1)
