@@ -123,7 +123,8 @@ def printHelp():
     print(" -ssl    turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, default: false                                ") 
     print(" -vlh    virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")
     print(" -hc     host checking [true/false], checks if the host is the same as in cdtrace and provided in hdbuserkey, might be necessary to turn to false   ")
-    print("         e.g. if you for some reason must provide full host name in hdbuserkey (it will still give warnings though), default: true                  ")                
+    print("         e.g. if you for some reason must provide full host name in hdbuserkey (it will still give warnings though), default: true                  ")
+    print(" -sh     shell, default: /bin/bash                                                                                                                  ")                
     print(" -k      DB user key, this one has to be maintained in hdbuserstore, i.e. as <sid>adm do                                                            ")               
     print("         > hdbuserstore SET <DB USER KEY> <ENV> <USERNAME> <PASSWORD>                     , default: SYSTEMKEY                                      ")
     print("                                                                                                                                                    ")    
@@ -298,7 +299,7 @@ class Tenant:
         return str(self.indexserverPort)
         
 class HDBCONS:
-    def __init__(self, local_host, hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName = None):
+    def __init__(self, local_host, hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName = None, shell = '/bin/bash'):
         self.local_host = local_host
         self.local_dbinstance = local_dbinstance
         self.hosts = hosts
@@ -313,6 +314,7 @@ class HDBCONS:
         self.temp_host_output_dirs = []
         # SET HDBCONS STRINGS
         self.hdbcons_strings = []
+        self.shell = shell
         for host in self.hosts:
             if not self.is_mdc:       # not MDC
                 if not self.is_scale_out:
@@ -322,7 +324,7 @@ class HDBCONS:
             else:                       # MDC (both SystemDB and Tenant)
                 self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+self.communicationPort+' ')   # SAP Notes 2222218 and 2410143
     def create_temp_output_directories(self, host_check): # CREATE TEMPORARY OUTPUT DIRECTORIES and SET PRIVILEGES (CHMOD)
-        cdtrace_path_local = cdalias('cdtrace', self.local_dbinstance)
+        cdtrace_path_local = cdalias('cdtrace', self.local_dbinstance, self.shell)
         if not self.local_host in cdtrace_path_local:
             if host_check:
                 print("ERROR, local host, ", self.local_host, ", is not part of cdtrace, ", cdtrace_path_local)
@@ -448,7 +450,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -475,9 +477,9 @@ def is_secondary(comman):
     log(printout, comman)
     return result 
 
-def is_multitenant_database_container(local_dbinstance):
+def is_multitenant_database_container(local_dbinstance, shell):
     is_mdc = False
-    global_ini = cdalias('cdcoc', local_dbinstance)+"/global.ini"
+    global_ini = cdalias('cdcoc', local_dbinstance, shell)+"/global.ini"
     with open(global_ini) as gf:
         is_mdc = 'mode = multidb' in gf.read()
     return is_mdc
@@ -969,9 +971,9 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
             log(str(nCleaned)+" hanasitter output files were removed", comman)
     return [recorded, offline]
             
-def cdalias(alias, local_dbinstance):   # alias e.g. cdtrace, cdhdb, ...
+def cdalias(alias, local_dbinstance, shell):   # alias e.g. cdtrace, cdhdb, ...
     #command_run = subprocess.check_output(['/bin/bash', '-i', '-c', "alias "+alias]).split("alias")[1]
-    process = subprocess.Popen(['/bin/bash', '-i', '-c', "alias "+alias], stdout=subprocess.PIPE)
+    process = subprocess.Popen([shell, '-i', '-c', "alias "+alias], stdout=subprocess.PIPE)
     out, err = process.communicate()
     out = out.decode().split("alias")[1]
     pieces = out.strip("\n").strip(" "+alias+"=").strip("'").strip("cd ").split("/")
@@ -979,7 +981,7 @@ def cdalias(alias, local_dbinstance):   # alias e.g. cdtrace, cdhdb, ...
     for piece in pieces:
         if piece and piece[0] == '$':
             #piece = (subprocess.check_output(['/bin/bash', '-i', '-c', "echo "+piece])).strip("\n")
-            echo = subprocess.Popen(['/bin/bash', '-i', '-c', "echo "+piece], stdout=subprocess.PIPE)
+            echo = subprocess.Popen([shell, '-i', '-c', "echo "+piece], stdout=subprocess.PIPE)
             out, err = echo.communicate()
             piece = out.decode().strip("\n")
         path = path + '/' + piece + '/'
@@ -1059,6 +1061,7 @@ def main():
     ssl = "false"
     virtual_local_host = "" #default: assume physical local host
     host_check = "true"
+    shell = "/bin/bash"
     dbuserkey = 'SYSTEMKEY' # This KEY has to be maintained in hdbuserstore  
                             # so that   hdbuserstore LIST    gives e.g. 
                             # KEY SYSTEMKEY
@@ -1141,6 +1144,7 @@ def main():
                     ssl                                 = getParameterFromFile(firstWord, '-ssl', flagValue, flag_file, flag_log, ssl)
                     virtual_local_host                  = getParameterFromFile(firstWord, '-vlh', flagValue, flag_file, flag_log, virtual_local_host)
                     host_check                          = getParameterFromFile(firstWord, '-hc', flagValue, flag_file, flag_log, host_check)
+                    shell                               = getParameterFromFile(firstWord, '-sh', flagValue, flag_file, flag_log, shell)
                     dbuserkey                           = getParameterFromFile(firstWord, '-k', flagValue, flag_file, flag_log, dbuserkey)
                     cpu_check_params                    = getParameterListFromFile(firstWord, '-cpu', flagValue, flag_file, flag_log, cpu_check_params)
      
@@ -1195,6 +1199,7 @@ def main():
     ssl                                 = getParameterFromCommandLine(sys.argv, '-ssl', flag_log, ssl)
     virtual_local_host                  = getParameterFromCommandLine(sys.argv, '-vlh', flag_log, virtual_local_host)
     host_check                          = getParameterFromCommandLine(sys.argv, '-hc', flag_log, host_check)
+    shell                               = getParameterFromCommandLine(sys.argv, '-sh', flag_log, shell)
     dbuserkey                           = getParameterFromCommandLine(sys.argv, '-k', flag_log, dbuserkey)
     cpu_check_params                    = getParameterListFromCommandLine(sys.argv, '-cpu', flag_log, cpu_check_params)  
      
@@ -1213,7 +1218,7 @@ def main():
     key_environment = key_environment.split('\n')
     key_environment = [ke for ke in key_environment if ke and not ke == 'Operation succeed.']
     ENV = key_environment[1].replace('  ENV : ','').replace(';',',').split(',')
-    key_hosts = [env.split(':')[0] for env in ENV] 
+    key_hosts = [env.split(':')[0].split('.')[0] for env in ENV]  #if full host name is specified in the Key, only the first part is used
     if not local_host in key_hosts and not 'localhost' in key_hosts:
         #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
         #possible future masters in the hdbuserstore:   virt1:30413,virt3:30413,virt4:30413, so he executed HANASitter on virt2 with  -vlh virt2  --> worked fine
@@ -1285,15 +1290,15 @@ def main():
         time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
 
     ### MDC or not, SystemDB or Tenant ### 
-    is_mdc = is_multitenant_database_container(local_dbinstance)
+    is_mdc = is_multitenant_database_container(local_dbinstance, shell)
 
     tenantIndexserverPorts = []  
     #output = subprocess.check_output('HDB info', shell=True).splitlines(1) 
     output = run_command('HDB info').splitlines(1)
     tenantIndexserverPorts = [line.split(' ')[-1].strip('\n') for line in output if "hdbindexserver -port" in line]
     tenantDBNames = [line.split(' ')[0].replace('adm','').replace('usr','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated (below we get the names in case of low isolated)
-    #output = subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock', shell=True).splitlines(1)   
-    output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock').splitlines(1)
+    #output = subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock', shell=True).splitlines(1)  
+    output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'/lock').splitlines(1)
     nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
     if not tenantDBNames:
         print("WARNING: Something went wrong, it passed online tests but still no tenant names were found. Is this HANA 1? HANA 1 is not supported as of May 2021.")
@@ -1301,7 +1306,7 @@ def main():
     ### TENANT NAMES for NON HIGH-ISOLATED MDC ###
     if is_mdc:
         if tenantDBNames.count(tenantDBNames[0]) == len(tenantDBNames) and tenantDBNames[0] == SID:   # if all tenant names are equal and equal to SystemDB's SID, then it is non-high-isolation --> get tenant names using daemon instead
-            [tenantDBNames, tenantIndexserverPorts] = tenant_names_and_ports(cdalias('cdhdb', local_dbinstance)+local_host+"/daemon.ini") # if non-high isolation the tenantIndexserverPorts from HDB info could be wrong order
+            [tenantDBNames, tenantIndexserverPorts] = tenant_names_and_ports(cdalias('cdhdb', local_dbinstance, shell)+local_host+"/daemon.ini") # if non-high isolation the tenantIndexserverPorts from HDB info could be wrong order
 
     ####### COMMUNICATION PORT (i.e. nameserver port if SystemDB at MDC, or indexserver port if TenantDB and if non-MDC) ########
     communicationPort = "-1"
@@ -1339,7 +1344,7 @@ def main():
     used_hosts = []
     for potential_host in hosts_worker_and_standby:        
         #if '@'+communicationPort in subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+potential_host+'/lock', shell=True):
-        if '@'+communicationPort in run_command('ls -l '+cdalias('cdhdb', local_dbinstance)+potential_host+'/lock'):
+        if '@'+communicationPort in run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+potential_host+'/lock'):
             used_hosts.append(potential_host) 
         
     ############ CHECK AND CONVERT THE REST OF THE INPUT PARAMETERS ################
@@ -1588,6 +1593,10 @@ def main():
         if not receiver_emails:
             log("INPUT ERROR: -enm is specified although -en is not, this makes no sense. Please see --help for more information.", comman)
             os._exit(1)
+    ### shell, -sh
+    if not shell in ['/bin/bash', '/bin/sh', '/bin/csh']:
+        log("INPUT ERROR: -sh must be a shell. If I forgot one, please let me know. Please see --help for more information.", comman)
+        os._exit(1)
 
     ############# EMAIL NOTIFICATION ##############
     if receiver_emails:
@@ -1595,7 +1604,7 @@ def main():
         emailNotification = EmailNotification(receiver_emails, email_client, senders_email, mail_server, SID)
 
     ### FILL HDBCONS STRINGS ###
-    hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName)
+    hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName, shell)
 
     ################ START #################
     if is_mdc:
