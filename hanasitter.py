@@ -336,14 +336,11 @@ class HDBCONS:
             self.temp_host_output_dirs.append(cdtrace_path_local.replace(self.local_host, host)+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d")+"/")
         for path in self.temp_host_output_dirs:
             if not os.path.exists(path):
-                #subprocess.check_output("mkdir "+path, shell=True)
                 dummyout = run_command("mkdir "+path)
-            #subprocess.check_output("chmod 777 "+path, shell=True)
             dummyout = run_command("chmod 777 "+path)
     def clear(self):
         for path in self.temp_host_output_dirs:
             if os.path.isdir(path):
-                #subprocess.check_output("rm -r "+path, shell=True)
                 dummout = run_command("rm -r "+path)
 
         
@@ -487,7 +484,6 @@ def is_multitenant_database_container(local_dbinstance, shell):
 def ping_db(comman, output):
     with open(os.devnull, 'w') as devnull:  # just to get no stdout in case HANA is offline
         try:
-            #output[0] = subprocess.check_output(comman.hdbsql_string+''' -j -A -U '''+comman.dbuserkey+''' "select * from dummy"''', shell=True, stderr=devnull) 
             output[0] = run_command(comman.hdbsql_string+''' -j -A -U '''+comman.dbuserkey+''' "select * from dummy"''') #this might be a problem ... from https://docs.python.org/3/library/subprocess.html#subprocess.getoutput : 
             #The stdout and stderr arguments may not be supplied at the same time as capture_output. If you wish to capture and combine both streams into one, use stdout=PIPE and stderr=STDOUT instead of capture_output.
         except:
@@ -545,7 +541,6 @@ def file_lines_with_word(file_name, word):
 def clean_outputs(minRetainedOutputDays, comman):
     path = comman.out_dir
     nFilesBefore = len([name for name in os.listdir(path)])
-    #subprocess.check_output("find "+path+"/* -mtime +"+str(minRetainedOutputDays)+" -delete", shell=True)
     dummyout = run_command("find "+path+"/* -mtime +"+str(minRetainedOutputDays)+" -delete")
     nFilesAfter = len([name for name in os.listdir(path)])
     return nFilesBefore - nFilesAfter 
@@ -553,7 +548,6 @@ def clean_outputs(minRetainedOutputDays, comman):
 def clean_logs(minRetainedLogDays, comman):
     path = comman.log_dir
     nFilesBefore = len([name for name in os.listdir(path) if "hanasitterlog" in name])
-    #subprocess.check_output("find "+path+"/hanasitterlog* -mtime +"+str(minRetainedLogDays)+" -delete", shell=True)
     dummyout = run_command("find "+path+"/hanasitterlog* -mtime +"+str(minRetainedLogDays)+" -delete")
     nFilesAfter = len([name for name in os.listdir(path) if "hanasitterlog" in name])
     return nFilesBefore - nFilesAfter  
@@ -621,7 +615,6 @@ def cpu_too_high(cpu_check_params, comman):
     for cpu_type in [1,2]:
         if cpu_type == input_cpu_type or input_cpu_type == 3:
             start_time = datetime.now()
-            #command_run = subprocess.check_output("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2], shell=True)
             command_run = run_command("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2])
             sar_words = command_run.split()
             cpu_column = 2 if cpu_type == 1 else 4
@@ -640,23 +633,18 @@ def cpu_too_high(cpu_check_params, comman):
     return any_cpu_too_high
 
 def stop_session(cf, comman):    
-    #connExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where VIEW_COLUMN_NAME = 'CONNECTION_ID' and VIEW_NAME = '"+cf.view+"'\"", shell=True).strip(' '))
     connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where VIEW_COLUMN_NAME = 'CONNECTION_ID' and VIEW_NAME = '"+cf.view+"'\"").strip(' '))
     if connExists:
-        #connIds = subprocess.check_output(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).splitlines(1)
         connIds = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+'"').splitlines(1)
         connIds = [c.strip('\n').strip('|').strip(' ') for c in connIds]
         for connId in connIds:
-            #connExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"", shell=True).strip(' '))
             connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"").strip(' '))
             if not connExists:
                 log("Connection "+connId+" was already disconnected before HANASitter got to it", comman)
             else:
                 log("Will disconnect session "+connId+" due to the check: "+cf.whereClauseDescription, comman)
                 try:
-                    #subprocess.check_output(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """, shell=True)
                     dummyout = run_command(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """)
-                    #connExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"", shell=True).strip(' '))
                     connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"").strip(' '))
                     if connExists:
                         log("WARNING, statement \n    ALTER SYSTEM DISCONNECT SESSION '"+connId+"'\nwas executed but the connection "+connId+" is still there. It might take some time until it actually disconnects.", comman)
@@ -671,19 +659,16 @@ def stop_session(cf, comman):
 
 def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman):   # cf = critical_feature, # comman = communication manager
     #CHECKS
-    #viewExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitors where view_name = '"+cf.view+"'\"", shell=True).strip(' '))
     viewExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitors where view_name = '"+cf.view+"'\"").strip(' '))
     if not viewExists:
         log("INPUT ERROR, the view given as first entry in the -cf flag, "+cf.view+", does not exist. Please see --help for more information.", comman)
         os._exit(1)
     if not cf.whereMode:
-        #columnExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = '"+cf.feature+"'\"", shell=True).strip(' ')) 
         columnExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = '"+cf.feature+"'\"").strip(' ')) 
         if not columnExists:
             log("INPUT ERROR, the view "+cf.view+" does not have the column "+cf.feature+". Please see --help for more information.", comman)
             os._exit(1)
     if host_mode:
-        #hostColumnExists = int(subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = 'HOST'\"", shell=True).strip(' ')) 
         hostColumnExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = 'HOST'\"").strip(' ')) 
         if not hostColumnExists:
             log("INPUT ERROR, you have specified host mode with -hf, but the view "+cf.view+" does not have a HOST column. Please see --help for more information.", comman)
@@ -693,18 +678,14 @@ def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman): 
         # EXECUTE
         nCFsPerHost = []
         if host_mode:
-            #hostsInView = subprocess.check_output(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select distinct HOST from SYS."+cf.view+"\"", shell=True).strip(' ').split('\n')
             hostsInView = run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select distinct HOST from SYS."+cf.view+"\"").strip(' ').split('\n')
             hostsInView = [h for h in hostsInView if h != ''] 
             for host in hostsInView:
-                #nCFsPerHost.append([int(subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+' and HOST = \''+host+'\'"', shell=True).split('|')[5].replace(" ", "")), host])
                 nCFsPerHost.append([int(run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+' and HOST = \''+host+'\'"').split('|')[5].replace(" ", "")), host])
         else:                
-            #nCFsPerHost.append([int(subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True).split('|')[5].replace(" ", "")), ''])
             nCFsPerHost.append([int(run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+'"').split('|')[5].replace(" ", "")), ''])
         # COLLECT INFO
         if comman.log_features:  #already prevented that log features (-lf) and host mode (-hm) is not used together
-            #critical_feature_info[0] = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select * from SYS.'+cf.view+' where '+cf.whereClause+'"', shell=True)
             critical_feature_info[0] = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select * from SYS.'+cf.view+' where '+cf.whereClause+'"')
         for cfHost in nCFsPerHost:
             if cfHost[1] in nbrCFSum:
@@ -720,7 +701,6 @@ def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman): 
 
  
 def record_gstack(gstacks_interval, comman):
-    #pid = subprocess.check_output("pgrep hdbindexserver", shell=True).strip("\n").strip(" ")
     pid = run_command("pgrep hdbindexserver").strip("\n").strip(" ")
     start_time = datetime.now()
     filename = (comman.out_dir+"/gstack_"+pid+"_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
@@ -805,7 +785,6 @@ def record_customsql(customsql, hdbcons, comman):
     filename = comman.out_dir+"/custom_sql_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt"
     customsql_output_file = open(filename, "a")
     start_time = datetime.now()
-    #customsql_output = subprocess.check_output(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "'+customsql.custom_sql_recording+'"', shell=True)
     customsql_output = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "'+customsql.custom_sql_recording+'"')
     customsql_output_file.write(customsql_output)   
     customsql_output_file.flush()
@@ -1006,7 +985,6 @@ def log(message, comman, file_name = "", sendEmail = False):
         if emailNotification.senderEmail:
             mailstring += ' -S from="'+emailNotification.senderEmail+'" '
         mailstring += ",".join(emailNotification.receiverEmails)
-        #output = subprocess.check_output(mailstring, shell=True)
         output = run_command(mailstring)
     
 def main():
@@ -1015,8 +993,6 @@ def main():
         if sys.version_info[1] != 7:
             print("VERSION ERROR: hanasitter is only supported for Python 2.7.x (for HANA 2 SPS05 and lower) and for Python 3.7.x (for HANA 2 SPS06 and higher). Did you maybe forget to log in as <sid>adm before executing this?")
             os._exit(1)
-    if sys.version_info[0] == 3:
-        print("VERSION WARNING: You are among the first using HANASitter on Python 3. As always, use on your own risk, and please report issues to christian.hansen01@sap.com. Thank you!")
 
     #####################   DEFAULTS   ####################
     online_test_interval = 3600 #seconds
@@ -1090,6 +1066,8 @@ def main():
     if '-d' in sys.argv or '--disclaimer' in sys.argv:
         printDisclaimer() 
     flag_files = getParameterListFromCommandLine(sys.argv, '-ff', flag_log, flag_files)
+    if flag_files:
+        print("Make sure the configuration file only contains ascii characters!")
      
     ############ CONFIGURATION FILE ###################
     for flag_file in flag_files:
@@ -1204,9 +1182,7 @@ def main():
     cpu_check_params                    = getParameterListFromCommandLine(sys.argv, '-cpu', flag_log, cpu_check_params)  
      
     ############ GET LOCAL HOST, LOCAL SQL PORT, LOCAL INSTANCE and SID ##########
-    #local_host = subprocess.check_output("hostname", shell=True).replace('\n','') if virtual_local_host == "" else virtual_local_host
     local_host = run_command("hostname").replace('\n','') if virtual_local_host == "" else virtual_local_host
-    #key_environment = subprocess.check_output('''hdbuserstore LIST '''+dbuserkey, shell=True) 
     key_environment = run_command('''hdbuserstore LIST '''+dbuserkey)
     if "NOT FOUND" in key_environment:
         print("ERROR, the key ", dbuserkey, " is not maintained in hdbuserstore.")
@@ -1242,7 +1218,6 @@ def main():
         else:
             print("WARNING: The hosts provided with the user key, "+dbuserkey+", do not all have the same instance number. They should. Continue on your own risk!")
     local_dbinstance = dbinstances[local_host_index]
-    #SID = subprocess.check_output('whoami', shell=True).replace('\n','').replace('adm','').upper()
     SID = run_command('whoami').replace('\n','').replace('adm','').upper()
 
     ############# OUTPUT DIRECTORIES #########
@@ -1258,9 +1233,10 @@ def main():
     out_config = checkAndConvertBooleanFlag(out_config, "-oc") 
     if out_config:
         parameter_string = "\n".join("{}\t{}".format(k, "= "+v[0]+" from "+v[1]) for k, v in flag_log.items())
-        log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with\n"+parameter_string+"\nas "+dbuserkey+": "+'\n'.join(key_environment), CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))  
+        startstring = "**************************************************************************************\nHANASitter started "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with\n"+parameter_string+"\nas "+dbuserkey+": "+'\n'.join(key_environment)+"\n\n ANY USAGE OF HANASITTER ASSUMES THAT YOU HAVE READ AND UNDERSTOOD THE DISCLAIMER!\n    python hanasitter.py --disclaimer\n\n**************************************************************************************"
     else:
-        log("\nHANASitter executed "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with \n"+" ".join(sys.argv)+"\nas "+dbuserkey+": "+'\n'.join(key_environment), CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))  
+        startstring = "**************************************************************************************\nHANASitter started "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with \n"+" ".join(sys.argv)+"\nas "+dbuserkey+": "+'\n'.join(key_environment)+"\n\n ANY USAGE OF HANASITTER ASSUMES THAT YOU HAVE READ AND UNDERSTOOD THE DISCLAIMER!\n    python hanasitter.py --disclaimer\n\n**************************************************************************************"
+    log(startstring, CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))    
     ### std_out, -so
     std_out = checkAndConvertBooleanFlag(std_out, "-so")
     ### ssl, -ssl
@@ -1293,11 +1269,9 @@ def main():
     is_mdc = is_multitenant_database_container(local_dbinstance, shell)
 
     tenantIndexserverPorts = []  
-    #output = subprocess.check_output('HDB info', shell=True).splitlines(1) 
     output = run_command('HDB info').splitlines(1)
     tenantIndexserverPorts = [line.split(' ')[-1].strip('\n') for line in output if "hdbindexserver -port" in line]
     tenantDBNames = [line.split(' ')[0].replace('adm','').replace('usr','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated (below we get the names in case of low isolated)
-    #output = subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+local_host+'/lock', shell=True).splitlines(1)  
     output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'/lock').splitlines(1)
     nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
     if not tenantDBNames:
@@ -1328,7 +1302,6 @@ def main():
             os._exit(1)
 
     ### SCALE OUT or Single Host ###
-    #hosts_worker_and_standby = subprocess.check_output('sapcontrol -nr '+local_dbinstance+' -function GetSystemInstanceList', shell=True).splitlines(1)
     hosts_worker_and_standby = run_command('sapcontrol -nr '+local_dbinstance+' -function GetSystemInstanceList').splitlines(1)
     hosts_worker_and_standby = [line.split(',')[0] for line in hosts_worker_and_standby if ("HDB" in line or "HDB|HDB_WORKER" in line or "HDB|HDB_STANDBY" in line)] #Should we add HDB|HDB_XS_WORKER also?
     hosts_worker_and_standby_short = [host.split('.')[0] for host in hosts_worker_and_standby] # to deal with HSR and virtual host names (from Marco)
@@ -1343,7 +1316,6 @@ def main():
     ### HOST(S) USED BY THIS DB ###
     used_hosts = []
     for potential_host in hosts_worker_and_standby:        
-        #if '@'+communicationPort in subprocess.check_output('ls -l '+cdalias('cdhdb', local_dbinstance)+potential_host+'/lock', shell=True):
         if '@'+communicationPort in run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+potential_host+'/lock'):
             used_hosts.append(potential_host) 
         
