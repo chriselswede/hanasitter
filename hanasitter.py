@@ -55,10 +55,12 @@ def printHelp():
     print("         default: [] (not used) so if you only require one check per feature, do not use -if                                                        ")
     print(" -tf     feature check time out [seconds], time it waits before the DB is considered unresponsive during a feature check                            ")
     print("         (see -cf), if -if is used this time out will be added to the interval and then multiplied with number checks, default: 60 seconds          ")
-    print(" -sc     sql cache check max diff pct [%], this specifies the maximum difference in percentage in average execution duration of a statement compared")
-    print("         to that same statement after it changed the execution engine (note: the sql cache check will only be executed if recording has not already ")
-    print("         been done from either the CPU check, Ping check or Feature Check),     default: -1  (the sql cache check is not executed)                  ")   
+    print(" -sc     sql cache check min diff pct [%], this specifies the minimum difference in percentage in average execution duration of a statement compared")
+    print("         to that same statement after it changed the execution engine, i.e. if difference is above this, this could be considered a potential       ")
+    print("         critical engine change     (note: the sql cache check will only be executed if recording has not already been done from either the         ")
+    print("         CPU check, Ping check or Feature Check),                               default: -1  (the sql cache check is not executed)                  ")   
     print(" -scc    min execution count to be considered in the sql cache check,   default: 0     (consider even if only executed once after engine change)    ")
+    print(" -sct    min total execution time [minutes] to be considered in the sql cache check, default: 0  (consider even if total execution time is almost 0)")
     print(" -scp    number hours printed before and after the max snapshot time of a potential critical engine change, default: 0    (nothing will be printed) ")
     print("         Note: It might be better to do your own investigation on HOST_SQL_PLAN_CACHE after you got the potential critical engine changes from -sc  ")
     print(" -lf     log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
@@ -189,7 +191,7 @@ def printHelp():
     print('''> python hanasitter.py -k <key> -pt 10 -cf "M_SERVICE_THREADS,WHERE,IS_ACTIVE='TRUE' AND THREAD_STATE<>'Running',500"                           ''')
     print('''  -ns 1 -cs "SELECT * from SYS.M_DEV_TRANSACTIONS_HISTORY_ WHERE PORT = '31003' AND START_TIME >= ADD_SECONDS (CURRENT_TIMESTAMP, -14400)"      ''')
     print("                                                                                                                                                    ")
-    print("EXAMPLE (If the average execution time changes more then 6 percent after an engine change (where both engine possibilities were executed more than  ")
+    print("EXAMPLE (If the average execution time changes more than 6 percent after an engine change (where both engine possibilities were executed more than  ")
     print("         5 times there will be printouts from the SQL plan cache ±5 hours around the engine changes, and an email will be send)                     ")
     print("  > python hanasitter.py -sc 6 -scc 5 -scp 5 -en christian.hansen01@sap.com -k T1KEY                                                                ")
     print("                                                                                                                                                    ")
@@ -422,18 +424,20 @@ class CriticalFeature:
         self.text = text
 
 class HashCache:
-    def __init__(self, hash, engines, avg_exec_ms, exec_count, max_snp_time):
+    def __init__(self, hash, engines, avg_exec_ms, exec_count, tot_exec_minutes, max_snp_time):
         self.hash = hash
         self.engines = [engines]
         self.avg_exec_ms = [avg_exec_ms]
         self.diff_avg_exec_pct = [0.0]
         self.exec_count = [exec_count]
+        self.tot_exec_time_minutes = [tot_exec_minutes]
         self.max_snp_time = [max_snp_time]
-    def add_a_hashcache(self, engines, avg_exec_ms, exec_count, max_snp_time):
+    def add_a_hashcache(self, engines, avg_exec_ms, exec_count, tot_exec_minutes, max_snp_time):
         self.engines.append(engines)
         self.avg_exec_ms.append(avg_exec_ms)
         self.diff_avg_exec_pct.append(0.0)
         self.exec_count.append(exec_count)
+        self.tot_exec_time_minutes.append(tot_exec_minutes)
         self.max_snp_time.append(max_snp_time)
         self.update_diff()
     def max_diff_avg_exec_pct(self):
@@ -445,11 +449,11 @@ class HashCache:
     def getLists(self):
         lists = []
         for i in range(len(self.engines)):
-            lists.append([self.hash, self.engines[i], self.avg_exec_ms[i], self.diff_avg_exec_pct[i], self.exec_count[i], self.max_snp_time[i]])
+            lists.append([self.hash, self.engines[i], self.avg_exec_ms[i], self.diff_avg_exec_pct[i], self.exec_count[i], self.tot_exec_time_minutes[i], self.max_snp_time[i]])
         return lists
     def printHashCache(self):
         for i in range(len(self.engines)):
-            print("Hash: ", self.hash, "  Engines: ", self.engines[i], "  Average Execution Time [ms]: ", self.avg_exec_ms[i], "  Diff of Avg Exec Time [%]: ", self.diff_avg_exec_pct[i], "  Execution Count:", self.exec_count[i], "  Max snapshot time: ", self.max_snp_time[i])
+            print("Hash: ", self.hash, "  Engines: ", self.engines[i], "  Average Execution Time [ms]: ", self.avg_exec_ms[i], "  Diff of Avg Exec Time [%]: ", self.diff_avg_exec_pct[i], "  Execution Count:", self.exec_count[i], "   Total Execution Time [m]", self.tot_exec_time_minutes[i], "  Max snapshot time: ", self.max_snp_time[i])
         
 ######################## DEFINE FUNCTIONS ################################
 
@@ -487,7 +491,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-scc", "-scp","-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-scc", "-sct", "-scp","-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -754,14 +758,14 @@ def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman): 
         nbrCFSum[h] = int ( float(nCF) / float(cf.nbrIterations) )
     nbrCFsPerHost[0] = nbrCFSum  #output 
 
-def sqlCacheCheck(max_avg_exec_time_diff_pct, min_exec_counts, h_print_engine_changes, comman):
+def sqlCacheCheck(min_avg_exec_time_diff_pct, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, comman):
     start_time = datetime.now()
     hashes_with_engine_change = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select STATEMENT_HASH from (select STATEMENT_HASH, EXECUTION_ENGINE from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE group by STATEMENT_HASH, EXECUTION_ENGINE order by STATEMENT_HASH) group by STATEMENT_HASH having count(*) > 1"').splitlines(1)
     nbr_hashes_with_engine_change = len(hashes_with_engine_change)
     if nbr_hashes_with_engine_change > 0:
         hashes_with_engine_change = [hash.strip('\n').strip('|').strip(' ') for hash in hashes_with_engine_change]
         hashes_with_engine_change = "', '".join(hashes_with_engine_change)
-        select_string = "select MAX(RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20)) MAX_SNP_TIME, STATEMENT_HASH HASH,  LPAD(TO_DECIMAL(SUM(TOTAL_EXECUTION_TIME)/SUM(EXECUTION_COUNT)/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(SUM(EXECUTION_COUNT), 11) EXEC_COUNT, EXECUTION_ENGINE ENGINES from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH in ('"+hashes_with_engine_change+"') group by STATEMENT_HASH, EXECUTION_ENGINE order by STATEMENT_HASH"
+        select_string = "select MAX(RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20)) MAX_SNP_TIME, STATEMENT_HASH HASH,  LPAD(TO_DECIMAL(SUM(TOTAL_EXECUTION_TIME)/SUM(EXECUTION_COUNT)/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(SUM(EXECUTION_COUNT), 11) EXEC_COUNT, EXECUTION_ENGINE ENGINES, LPAD(TO_DECIMAL(SUM(TOTAL_EXECUTION_TIME)/1000/1000/60, 10, 0), 11) TOT_EXEC_MINUTES from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH in ('"+hashes_with_engine_change+"') group by STATEMENT_HASH, EXECUTION_ENGINE order by STATEMENT_HASH"
         output_table = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"').splitlines(1)
         HashCaches = {}
         for table_row in output_table:
@@ -775,15 +779,16 @@ def sqlCacheCheck(max_avg_exec_time_diff_pct, min_exec_counts, h_print_engine_ch
             engines = table_row[4].strip(' ')
             max_snp_time = table_row[0].strip(' ')
             exec_count = table_row[3].strip(' ')
-            if int(exec_count) >= min_exec_counts:
+            tot_exec_minutes = table_row[5].strip(' ')
+            if int(exec_count) >= min_exec_counts and int(tot_exec_minutes) >= min_tot_exec_time_minutes:
                 if hash in HashCaches:
-                    HashCaches[hash].add_a_hashcache(engines, avg_exec_ms, exec_count, max_snp_time)
+                    HashCaches[hash].add_a_hashcache(engines, avg_exec_ms, exec_count, tot_exec_minutes, max_snp_time)
                 else:
-                    HashCaches[hash] = HashCache(hash, engines, avg_exec_ms, exec_count, max_snp_time)
-        hasches_to_delete = [hash for hash in HashCaches if HashCaches[hash].max_diff_avg_exec_pct() < max_avg_exec_time_diff_pct]
+                    HashCaches[hash] = HashCache(hash, engines, avg_exec_ms, exec_count, tot_exec_minutes, max_snp_time)
+        hasches_to_delete = [hash for hash in HashCaches if HashCaches[hash].max_diff_avg_exec_pct() < min_avg_exec_time_diff_pct] #not of interest
         for hash in hasches_to_delete:
             del HashCaches[hash]
-        hash_header_list = ["Hash", "Engines", "Avg Exec Time [ms]", "Diff Avg Exec Time [%]", "Execution Count", "Max snapshot time"]
+        hash_header_list = ["Hash", "Engines", "Avg Exec Time [ms]", "Diff Avg Exec Time [%]", "Execution Count", "Total Exec Time [m]", "Max snapshot time"]
         hash_values_lists = []
         for h,hc in HashCaches.items():
             hash_values_lists.extend(hc.getLists())
@@ -986,7 +991,7 @@ def parallel_recording(record_type, recorder, hdbcons, comman):
     else:
         return record_customsql(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
 
-def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, max_avg_exec_time_diff_pct, min_exec_counts, h_print_engine_changes, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons):   
+def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, min_avg_exec_time_diff_pct, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons):   
     recorded = False
     offline = False
     while not recorded:
@@ -1053,8 +1058,8 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                             stop_session(cf, comman)
         if not recorded:
         # SQL CACHE ENGINE CHANGE Test - only done if recording has not already been done from either the CPU check, Ping check or Feature Check
-            if max_avg_exec_time_diff_pct >= 0:
-                nbr_hashes_with_critical_engine_change = sqlCacheCheck(max_avg_exec_time_diff_pct, min_exec_counts, h_print_engine_changes, comman)
+            if min_avg_exec_time_diff_pct >= 0:
+                nbr_hashes_with_critical_engine_change = sqlCacheCheck(min_avg_exec_time_diff_pct, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, comman)
                 if nbr_hashes_with_critical_engine_change > 0:
                     recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
         if not recorded:
@@ -1147,8 +1152,9 @@ def main():
     minRetainedLogDays = -1 #automatic cleanup of hanasitterlog
     out_config = "false"
     flag_files = []    #default: no configuration input file
-    max_avg_exec_time_diff_pct = "-1"
+    min_avg_exec_time_diff_pct = "-1"
     min_exec_counts = "0"
+    min_tot_exec_time_minutes = "0"
     h_print_engine_changes = "0"
     log_features = "false"
     receiver_emails = None
@@ -1234,8 +1240,9 @@ def main():
                     log_dir                             = getParameterFromFile(firstWord, '-ol', flagValue, flag_file, flag_log, log_dir)
                     minRetainedLogDays                  = getParameterFromFile(firstWord, '-olr', flagValue, flag_file, flag_log, minRetainedLogDays)
                     out_config                          = getParameterFromFile(firstWord, '-oc', flagValue, flag_file, flag_log, out_config)
-                    max_avg_exec_time_diff_pct          = getParameterFromFile(firstWord, '-sc', flagValue, flag_file, flag_log, max_avg_exec_time_diff_pct)
+                    min_avg_exec_time_diff_pct          = getParameterFromFile(firstWord, '-sc', flagValue, flag_file, flag_log, min_avg_exec_time_diff_pct)
                     min_exec_counts                     = getParameterFromFile(firstWord, '-scc', flagValue, flag_file, flag_log, min_exec_counts)
+                    min_tot_exec_time_minutes           = getParameterFromFile(firstWord, '-sct', flagValue, flag_file, flag_log, min_tot_exec_time_minutes)
                     h_print_engine_changes              = getParameterFromFile(firstWord, '-scp', flagValue, flag_file, flag_log, h_print_engine_changes)
                     log_features                        = getParameterFromFile(firstWord, '-lf', flagValue, flag_file, flag_log, log_features)
                     receiver_emails                     = getParameterListFromFile(firstWord, '-en', flagValue, flag_file, flag_log, receiver_emails)
@@ -1292,8 +1299,9 @@ def main():
     log_dir                             = getParameterFromCommandLine(sys.argv, '-ol', flag_log, log_dir)
     minRetainedLogDays                  = getParameterFromCommandLine(sys.argv, '-olr', flag_log, minRetainedLogDays)
     out_config                          = getParameterFromCommandLine(sys.argv, '-oc', flag_log, out_config)
-    max_avg_exec_time_diff_pct          = getParameterFromCommandLine(sys.argv, '-sc', flag_log, max_avg_exec_time_diff_pct)
+    min_avg_exec_time_diff_pct          = getParameterFromCommandLine(sys.argv, '-sc', flag_log, min_avg_exec_time_diff_pct)
     min_exec_counts                     = getParameterFromCommandLine(sys.argv, '-scc', flag_log, min_exec_counts)
+    min_tot_exec_time_minutes           = getParameterFromCommandLine(sys.argv, '-sct', flag_log, min_tot_exec_time_minutes)   
     h_print_engine_changes              = getParameterFromCommandLine(sys.argv, '-scp', flag_log, h_print_engine_changes)
     log_features                        = getParameterFromCommandLine(sys.argv, '-lf', flag_log, log_features)
     receiver_emails                     = getParameterListFromCommandLine(sys.argv, '-en', flag_log, receiver_emails)
@@ -1371,16 +1379,21 @@ def main():
     hdbsql_string = "hdbsql "
     if ssl:
         hdbsql_string = "hdbsql -e -ssltrustcert -sslcreatecert "
-    ### max_avg_exec_time_diff_pct, -sc
-    if not is_integer(max_avg_exec_time_diff_pct):
+    ### min_avg_exec_time_diff_pct, -sc
+    if not is_integer(min_avg_exec_time_diff_pct):
         log("INPUT ERROR: -sc must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
         os._exit(1)
-    max_avg_exec_time_diff_pct = int(max_avg_exec_time_diff_pct)
+    min_avg_exec_time_diff_pct = int(min_avg_exec_time_diff_pct)
     ### min_exec_counts, -scc
     if not is_integer(min_exec_counts):
         log("INPUT ERROR: -scc must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
         os._exit(1)
     min_exec_counts = int(min_exec_counts)
+    ### min_tot_exec_time_minutes, -sct
+    if not is_integer(min_tot_exec_time_minutes):
+        log("INPUT ERROR: -sct must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        os._exit(1)
+    min_tot_exec_time_minutes = int(min_tot_exec_time_minutes)
     ### h_print_engine_changes, -scp
     if not is_integer(h_print_engine_changes):
         log("INPUT ERROR: -scp must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
@@ -1796,7 +1809,7 @@ def main():
         while True: 
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
                 wasOnline = True
-                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, max_avg_exec_time_diff_pct, min_exec_counts, h_print_engine_changes, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons)
+                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, min_avg_exec_time_diff_pct, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons)
                 if recorded:
                     if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
                         hdbcons.clear()    #remove temporary output folders before exit
