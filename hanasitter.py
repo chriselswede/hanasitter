@@ -106,8 +106,9 @@ def printHelp():
     print("                                        for -rm = 3: time the thread waits after an custom sql,     default: 60 seconds                             ")
     print(" -cs     custom sql, this SELECT statement defines the output (see the -cs example below),     default: ''  (not used)                              ")
     print("         *** KILL SESSIONS (use with care!) ***                                                                                                     ")
-    print(" -ks     kill session [list of true/false], list of booleans (length must be the same as number of features defined by -cf) that defines if -cf's   ")
-    print("         features could indicate that the sessions (connections) are tried to be disconnected or not, default: None (not used)                      ")
+    print(' -ks     kill session [list of "0","C", or "D"], list of the characters 0, C, or D (length of the list must be the same as number of features       ')
+    print("         defined by -cf) that defines if -cf's features could indicate that the sessions (connections) should be tried to be cancelled (C), or      ")
+    print("         disconnected (D) or not (0), default: None (not used)                                                                                      ")
     print("         Note: Requires SESSION ADMIN                                                                                                               ")
     print("         *** ADMINS (Output Directory, Logging, Output and DB User) ***                                                                             ")
     print(" -od     output directory, full path of the folder where output files will end up (if the folder does not exist it will be created),                ")
@@ -366,7 +367,7 @@ class CommunicationManager:
         self.log_features = log_features     
         
 class CriticalFeature:
-    def __init__(self, view, feature, value, limit, killSession = False):
+    def __init__(self, view, feature, value, limit, killSession = '0'):
         self.text = ""
         self.view = view
         self.feature = feature
@@ -691,7 +692,8 @@ def cpu_too_high(cpu_check_params, comman):
             log(printout, comman, sendEmail = too_high_cpu)
     return any_cpu_too_high
 
-def stop_session(cf, comman):    
+def stop_session(cf, comman):
+    how_to_kill = 'CANCEL' if cf.killSession == 'C' else 'DISCONNECT'    
     connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where VIEW_COLUMN_NAME = 'CONNECTION_ID' and VIEW_NAME = '"+cf.view+"'\"").strip(' '))
     if connExists:
         connIds = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+'"').splitlines(1)
@@ -701,12 +703,12 @@ def stop_session(cf, comman):
             if not connExists:
                 log("Connection "+connId+" was already disconnected before HANASitter got to it", comman)
             else:
-                log("Will disconnect session "+connId+" due to the check: "+cf.whereClauseDescription, comman)
+                log("Will "+how_to_kill+" session "+connId+" due to the check: "+cf.whereClauseDescription, comman)
                 try:
-                    dummyout = run_command(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM DISCONNECT SESSION '"""+connId+"""'" """)
+                    dummyout = run_command(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM """+how_to_kill+""" SESSION '"""+connId+"""'" """)
                     connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"").strip(' '))
                     if connExists:
-                        log("WARNING, statement \n    ALTER SYSTEM DISCONNECT SESSION '"+connId+"'\nwas executed but the connection "+connId+" is still there. It might take some time until it actually disconnects.", comman)
+                        log("WARNING, statement \n    ALTER SYSTEM "+how_to_kill+" SESSION '"+connId+"'\nwas executed but the connection "+connId+" is still there. It might take some time until it actually disconnects.", comman)
                     else:
                         log("Succesfully disconnected session "+connId, comman)
                 except:
@@ -1054,7 +1056,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                         if host_mode:
                             hdbcons.hostsForRecording = hostsWithWrongNbrCFs
                         recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
-                        if cf.killSession:
+                        if cf.killSession != '0':
                             stop_session(cf, comman)
         if not recorded:
         # SQL CACHE ENGINE CHANGE Test - only done if recording has not already been done from either the CPU check, Ping check or Feature Check
@@ -1643,7 +1645,9 @@ def main():
         if not len(kill_session) == len(critical_features):
             log("INPUT ERROR: -ks must be a list with the same length as number features specified with -cf. Please see --help for more information.", comman)
             os._exit(1)
-        kill_session = [checkAndConvertBooleanFlag(ks, "-ks") for ks in kill_session]
+        if any(e not in ['0', 'C', 'D'] for e in kill_session):
+            log("INPUT ERROR: -ks must be a list with the elements either 0, C or D. Please see --help for more information.", comman)
+            os._exit(1)
         for i in range(len(kill_session)):
             critical_features[i].setKillSession(kill_session[i])
     ### intervals_of_features, -if
@@ -1651,7 +1655,7 @@ def main():
         if len(intervals_of_features)%2:
             log("INPUT ERROR: -if must be a list with the length of multiple of 2. Please see --help for more information.", comman)
             os._exit(1)
-        intervals_of_features = [intervals_of_features[i*2:i*2+2] for i in range(len(intervals_of_features)/2)]
+        intervals_of_features = [intervals_of_features[i*2:i*2+2] for i in range(int(len(intervals_of_features)/2))]
         if not len(intervals_of_features) == len(critical_features):
             log("INPUT ERROR: -if must specify as many intervals as number of critical feature. Please see --help for more information.", comman)
             os._exit(1)
