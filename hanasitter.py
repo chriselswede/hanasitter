@@ -456,7 +456,6 @@ class HashCache:
             if self.only_negative_changes and self.max_snp_time[i] < self.max_snp_time[index_min]:
                 diff_avg_exec_pct = 0
             self.diff_avg_exec_pct[i] = diff_avg_exec_pct
-
     def getLists(self):
         lists = []
         for i in range(len(self.engines)):
@@ -466,6 +465,15 @@ class HashCache:
         for i in range(len(self.engines)):
             print("Hash: ", self.hash, "  Engines: ", self.engines[i], "  Average Execution Time [ms]: ", self.avg_exec_ms[i], "  Diff of Avg Exec Time [%]: ", self.diff_avg_exec_pct[i], "  Execution Count:", self.exec_count[i], "   Total Execution Time [m]", self.tot_exec_time_minutes[i], "  Max snapshot time: ", self.max_snp_time[i])
         
+class SCCManager:
+    def __init__(self, min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes):
+        self.min_avg_exec_time_diff_pct = min_avg_exec_time_diff_pct
+        self.plan_id_changes = plan_id_changes
+        self.min_exec_counts = min_exec_counts
+        self.min_tot_exec_time_minutes = min_tot_exec_time_minutes
+        self.h_print_engine_changes = h_print_engine_changes
+        self.only_negative_changes = only_negative_changes
+
 ######################## DEFINE FUNCTIONS ################################
 
 def run_command(cmd):
@@ -770,9 +778,9 @@ def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman): 
         nbrCFSum[h] = int ( float(nCF) / float(cf.nbrIterations) )
     nbrCFsPerHost[0] = nbrCFSum  #output 
 
-def sqlCacheCheck(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, comman):
+def sqlCacheCheck(sccmanager, comman):
     start_time = datetime.now()
-    if plan_id_changes:
+    if sccmanager.plan_id_changes:
         change_type = 'PLAN_ID'
         change_type_description = 'plan id changes'
         change_title = 'Plan ID'
@@ -800,12 +808,12 @@ def sqlCacheCheck(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, 
             max_snp_time = table_row[0].strip(' ')
             exec_count = table_row[3].strip(' ')
             tot_exec_minutes = table_row[5].strip(' ')
-            if int(exec_count) >= min_exec_counts and int(tot_exec_minutes) >= min_tot_exec_time_minutes:
+            if int(exec_count) >= sccmanager.min_exec_counts and int(tot_exec_minutes) >= sccmanager.min_tot_exec_time_minutes:
                 if hash in HashCaches:
                     HashCaches[hash].add_a_hashcache(engines, avg_exec_ms, exec_count, tot_exec_minutes, max_snp_time)
                 else:
-                    HashCaches[hash] = HashCache(hash, engines, avg_exec_ms, exec_count, tot_exec_minutes, max_snp_time, only_negative_changes)
-        hasches_to_delete = [hash for hash in HashCaches if HashCaches[hash].max_diff_avg_exec_pct() < min_avg_exec_time_diff_pct] #not of interest
+                    HashCaches[hash] = HashCache(hash, engines, avg_exec_ms, exec_count, tot_exec_minutes, max_snp_time, sccmanager.only_negative_changes)
+        hasches_to_delete = [hash for hash in HashCaches if HashCaches[hash].max_diff_avg_exec_pct() < sccmanager.min_avg_exec_time_diff_pct] #not of interest
         for hash in hasches_to_delete:
             del HashCaches[hash]
         hash_header_list = ["Hash", change_title, "Avg Exec Time [ms]", "Diff Avg Exec Time [%]", "Execution Count", "Total Exec Time [m]", "Max snapshot time"]
@@ -815,10 +823,10 @@ def sqlCacheCheck(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, 
         nbr_hashes_with_critical_engine_change = len(HashCaches)
         if nbr_hashes_with_critical_engine_change > 0:
             table_printout = print_table(hash_header_list, hash_values_lists)
-            if h_print_engine_changes:
+            if sccmanager.h_print_engine_changes:
                 for h,hc in HashCaches.items():
                     for max_snp_time in hc.max_snp_time:
-                        select_string = "select RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20) SNP_TIME, STATEMENT_HASH HASH, LPAD(TO_DECIMAL(TOTAL_EXECUTION_TIME/EXECUTION_COUNT/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(EXECUTION_COUNT, 11) EXEC_COUNT, "+change_type+" from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH = '"+h+"' and SERVER_TIMESTAMP > ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), -"+str(h_print_engine_changes)+"*3600) and SERVER_TIMESTAMP < ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), "+str(h_print_engine_changes)+"*3600)"
+                        select_string = "select RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20) SNP_TIME, STATEMENT_HASH HASH, LPAD(TO_DECIMAL(TOTAL_EXECUTION_TIME/EXECUTION_COUNT/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(EXECUTION_COUNT, 11) EXEC_COUNT, "+change_type+" from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH = '"+h+"' and SERVER_TIMESTAMP > ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), -"+str(sccmanager.h_print_engine_changes)+"*3600) and SERVER_TIMESTAMP < ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), "+str(sccmanager.h_print_engine_changes)+"*3600)"
                         output_table = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"').splitlines(1)
                         header_list = ["Max snapshot time", "Hash", "Avg Exec Time [ms]", "Execution Count", change_title]
                         values_lists = []
@@ -1011,7 +1019,7 @@ def parallel_recording(record_type, recorder, hdbcons, comman):
     else:
         return record_customsql(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
 
-def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons):   
+def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, sccmanager, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons):   
     recorded = False
     offline = False
     while not recorded:
@@ -1078,8 +1086,8 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                             stop_session(cf, comman)
         if not recorded:
         # SQL CACHE ENGINE CHANGE Test - only done if recording has not already been done from either the CPU check, Ping check or Feature Check
-            if min_avg_exec_time_diff_pct >= 0:
-                nbr_hashes_with_critical_engine_change = sqlCacheCheck(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, comman)
+            if sccmanager.min_avg_exec_time_diff_pct >= 0:
+                nbr_hashes_with_critical_engine_change = sqlCacheCheck(sccmanager, comman)
                 if nbr_hashes_with_critical_engine_change > 0:
                     recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
         if not recorded:
@@ -1432,6 +1440,8 @@ def main():
     h_print_engine_changes = int(h_print_engine_changes)
     ### only_negative_changes, -scn
     only_negative_changes = checkAndConvertBooleanFlag(only_negative_changes, "-scn")
+    ########## SQL Cache Check Manager #################
+    sccmanager = SCCManager(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes)
     ### log_features, -lf
     log_features = checkAndConvertBooleanFlag(log_features, "-lf")
     if log_features and len(critical_features) == 0:
@@ -1844,7 +1854,7 @@ def main():
         while True: 
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
                 wasOnline = True
-                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons)
+                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, sccmanager, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons)
                 if recorded:
                     if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
                         hdbcons.clear()    #remove temporary output folders before exit
