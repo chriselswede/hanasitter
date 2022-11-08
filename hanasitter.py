@@ -67,6 +67,7 @@ def printHelp():
     print(" -scp    number hours printed before and after the max snapshot time of a potential critical engine change, default: 0    (nothing will be printed) ")
     print("         Note: It might be better to do your own investigation on HOST_SQL_PLAN_CACHE after you got the potential critical engine changes from -sc  ")
     print(" -scn    only negative changes [false/true], if true will only show engine changes that made performance worse, default: false                      ")
+    print(" -scx    number characters of the sql text printed together with the outputs defined by -scp, default: 0                                            ")
     print(" -lf     log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
     print(" -ci     check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
     print(" -ar     time to sleep after recording [seconds], if negative it exits, default: -1                                                                 ")
@@ -466,13 +467,14 @@ class HashCache:
             print("Hash: ", self.hash, "  Engines: ", self.engines[i], "  Average Execution Time [ms]: ", self.avg_exec_ms[i], "  Diff of Avg Exec Time [%]: ", self.diff_avg_exec_pct[i], "  Execution Count:", self.exec_count[i], "   Total Execution Time [m]", self.tot_exec_time_minutes[i], "  Max snapshot time: ", self.max_snp_time[i])
         
 class SCCManager:
-    def __init__(self, min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes):
+    def __init__(self, min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len):
         self.min_avg_exec_time_diff_pct = min_avg_exec_time_diff_pct
         self.plan_id_changes = plan_id_changes
         self.min_exec_counts = min_exec_counts
         self.min_tot_exec_time_minutes = min_tot_exec_time_minutes
         self.h_print_engine_changes = h_print_engine_changes
         self.only_negative_changes = only_negative_changes
+        self.sql_text_len = sql_text_len
 
 ######################## DEFINE FUNCTIONS ################################
 
@@ -510,7 +512,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -829,10 +831,19 @@ def sqlCacheCheck(sccmanager, comman):
                         select_string = "select RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20) SNP_TIME, STATEMENT_HASH HASH, LPAD(TO_DECIMAL(TOTAL_EXECUTION_TIME/EXECUTION_COUNT/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(EXECUTION_COUNT, 11) EXEC_COUNT, "+change_type+" from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH = '"+h+"' and SERVER_TIMESTAMP > ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), -"+str(sccmanager.h_print_engine_changes)+"*3600) and SERVER_TIMESTAMP < ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), "+str(sccmanager.h_print_engine_changes)+"*3600)"
                         output_table = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"').splitlines(1)
                         header_list = ["Max snapshot time", "Hash", "Avg Exec Time [ms]", "Execution Count", change_title]
+                        sql_text = ''
+                        if sccmanager.sql_text_len > 0:
+                            select_string = "select top 1 LPAD(STATEMENT_STRING, "+str(sccmanager.sql_text_len)+") SQL_TEXT from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH = '"+h+"'"
+                            sql_text = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"').strip(' ').strip('|').strip(' ')
+                        if sql_text: 
+                            header_list.append("SQL Text")
                         values_lists = []
                         for table_row in output_table:
                             table_row = table_row.strip('\n').strip('|').split('|')
-                            values_lists.append([table_row[0].strip(' '), table_row[1].strip(' '), table_row[2].strip(' '), table_row[3].strip(' '), table_row[4].strip(' ')])
+                            table_row = [table_row[0].strip(' '), table_row[1].strip(' '), table_row[2].strip(' '), table_row[3].strip(' '), table_row[4].strip(' ')]
+                            if sql_text:
+                                table_row.append(sql_text)
+                            values_lists.append(table_row)
                         engine_change_at_least_once = any([values_lists[i][4] != values_lists[i+1][4] for i in range(len(values_lists) - 1)])
                         if engine_change_at_least_once:
                             table_printout += "\n"+print_table(header_list, values_lists)
@@ -1186,6 +1197,7 @@ def main():
     min_tot_exec_time_minutes = "0"
     h_print_engine_changes = "0"
     only_negative_changes = "false"
+    sql_text_len = "0"
     log_features = "false"
     receiver_emails = None
     email_client = ''   #default email client, mailx, will be specifed later if -enc not provided
@@ -1276,6 +1288,7 @@ def main():
                     min_tot_exec_time_minutes           = getParameterFromFile(firstWord, '-sct', flagValue, flag_file, flag_log, min_tot_exec_time_minutes)
                     h_print_engine_changes              = getParameterFromFile(firstWord, '-scp', flagValue, flag_file, flag_log, h_print_engine_changes)
                     only_negative_changes               = getParameterFromFile(firstWord, '-scn', flagValue, flag_file, flag_log, only_negative_changes)
+                    sql_text_len                        = getParameterFromFile(firstWord, '-scx', flagValue, flag_file, flag_log, sql_text_len)
                     log_features                        = getParameterFromFile(firstWord, '-lf', flagValue, flag_file, flag_log, log_features)
                     receiver_emails                     = getParameterListFromFile(firstWord, '-en', flagValue, flag_file, flag_log, receiver_emails)
                     email_client                        = getParameterFromFile(firstWord, '-enc', flagValue, flag_file, flag_log, email_client)
@@ -1337,6 +1350,7 @@ def main():
     min_tot_exec_time_minutes           = getParameterFromCommandLine(sys.argv, '-sct', flag_log, min_tot_exec_time_minutes)   
     h_print_engine_changes              = getParameterFromCommandLine(sys.argv, '-scp', flag_log, h_print_engine_changes)
     only_negative_changes               = getParameterFromCommandLine(sys.argv, '-scn', flag_log, only_negative_changes)
+    sql_text_len                        = getParameterFromCommandLine(sys.argv, '-scx', flag_log, sql_text_len)
     log_features                        = getParameterFromCommandLine(sys.argv, '-lf', flag_log, log_features)
     receiver_emails                     = getParameterListFromCommandLine(sys.argv, '-en', flag_log, receiver_emails)
     email_client                        = getParameterFromCommandLine(sys.argv, '-enc', flag_log, email_client)
@@ -1440,8 +1454,16 @@ def main():
     h_print_engine_changes = int(h_print_engine_changes)
     ### only_negative_changes, -scn
     only_negative_changes = checkAndConvertBooleanFlag(only_negative_changes, "-scn")
+    ### sql_text_len, -scx
+    if not is_integer(sql_text_len):
+        log("INPUT ERROR: -scx must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        os._exit(1)
+    sql_text_len = int(sql_text_len)
+    if sql_text_len and not h_print_engine_changes:
+        log("INPUT ERROR: -scx is more then 0 while -scp is not, this makes no sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        os._exit(1) 
     ########## SQL Cache Check Manager #################
-    sccmanager = SCCManager(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes)
+    sccmanager = SCCManager(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len)
     ### log_features, -lf
     log_features = checkAndConvertBooleanFlag(log_features, "-lf")
     if log_features and len(critical_features) == 0:
