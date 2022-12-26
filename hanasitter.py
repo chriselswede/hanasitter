@@ -78,38 +78,43 @@ def printHelp():
     print("                                         order above, e.g. GStack 1, RTE 1, Gstack 2, RTE 2, ...                                                    ")
     print("                                     3 = different recording types recorded in parallel threads, e.g. if 2 GStacks and 1 RTE                        ")
     print("                                         requested then GStack 1 and RTE 1 are parallel done, when both done GStack 2 starts                        ")
-    print(" -rp     recording priorities [list of 5 integers [1,5]] defines what order the recording modes will be executed for rm = 1 and rm = 2              ")
-    print("                                     # 1 = RTE, # 2 = CallStacks, # 3 = GStacks, # 4 = Kernel Profiler, # 5 = Custom SQL,       default: 1,2,3,4,5  ")
+    print(" -rp     recording priorities [list of 6 integers [1,6]] defines what order the recording modes will be executed for rm = 1 and rm = 2              ")
+    print("                # 1 = RTE, # 2 = CallStacks, # 3 = GStacks, # 4 = Kernel Profiler, # 5 = Custom SQL, # 6 = Customer Query     default: 1,2,3,4,5,6  ")
     print(" -hm     host mode [true/false], if true then all critical features are considered per host and the recording is done only for those hosts where    ")
     print("                                 the critical feature is above allowed limit per host, default: false                                               ")
     print("                                 Note: -hm is not supported for gstack (-ng), but for the other recording possibilities (-np, -nc, and -nr)         ")
     print(" -ng     number indexserver gstacks created if the DB is considered unresponsive (Note: gstack blocks the indexserver! See SAP Note 2000000         ")
     print('         "Call stack generation via gstack"), default: 0  (not used)                                                                                ') 
-    print(" -ig     gstacks interval [seconds], for -rm = 1: time it waits after a gstack,                                                                ")
+    print(" -ig     gstacks interval [seconds], for -rm = 1: time it waits after a gstack,                                                                     ")
     print("                                     for -rm = 2: time it waits after a gstack,                                                                     ")
     print("                                     for -rm = 3: time the thread waits after a gstack,          default: 60 seconds                                ")
     print(" -np     number indexserver kernel profiler traces created if the DB is considered unresponsive: default: 0  (not used)                             ") 
     print(" -dp     profiler duration [seconds], how long time it is tracing, default: 60 seconds   (more info: SAP Note 1804811)                              ")
     print(" -wp     profiler wait time [milliseconds], wait time after callstacks of all running threads have been taken, default 0                            ")
-    print(" -ip     profiler interval [seconds], for -rm = 1: time it waits after a profiler trace,                                                       ")
+    print(" -ip     profiler interval [seconds], for -rm = 1: time it waits after a profiler trace,                                                            ")
     print("                                      for -rm = 2: time it waits after a profiler trace,                                                            ")
     print("                                      for -rm = 3: time the thread waits after a profiler trace,         default: 60 seconds                        ")
     print(" -nc     number call stacks created if the DB is considered unresponsive: default: 0  (not used)                                                    ") 
-    print(" -ic     call stacks interval [seconds], for -rm = 1: time it waits after a call stack,                                                        ")
+    print(" -ic     call stacks interval [seconds], for -rm = 1: time it waits after a call stack,                                                             ")
     print("                                         for -rm = 2: time it waits after a call stack,                                                             ")
     print("                                         for -rm = 3: time the thread waits after a call stack,  default: 60 seconds                                ")
     print(" -nr     number rte dumps created if the DB is considered unresponsive, default: 0    (not used)                                                    ") 
     print("         Note: output is restricted to these folders /tmp, $HOME, $DIR_INSTANCE/work, and $SAP_RETRIEVAL_PATH                                       ")
-    print(" -ir     rte dumps interval [seconds], for -rm = 1: time it waits after an rte dump,                                                            ")
+    print(" -ir     rte dumps interval [seconds], for -rm = 1: time it waits after an rte dump,                                                                ")
     print("                                       for -rm = 2: time it waits after an rte dump,                                                                ")
     print("                                       for -rm = 3: time the thread waits after an rte dump,     default: 60 seconds                                ")
     print(" -mr     rte dump mode [0 or 1], -mr = 0: normal rte dump,                                                                                          ")
     print("                                 -mr = 1: light rte dump mode, only rte dump with STACK_SHORT and THREADS sections, and some M_ views,  default: 0  ")
-    print(" -ns     number custom sql outputs provided if the DB is considered unresponsive,  default: 0 (not used)                                            ")
-    print(" -is     custom sql interval [seconds], for -rm = 1: time it waits after an custom sql,                                                             ")
-    print("                                        for -rm = 2: time it waits after an custom sql,                                                             ")
-    print("                                        for -rm = 3: time the thread waits after an custom sql,     default: 60 seconds                             ")
+    print(" -ns     number custom select outputs provided if the DB is considered in a potential critical situation,  default: 0 (not used)                    ")
+    print(" -is     custom select interval [seconds], for -rm = 1: time it waits after a custom select,                                                        ")
+    print("                                           for -rm = 2: time it waits after a custom select,                                                        ")
+    print("                                           for -rm = 3: time the thread waits after a custom select,     default: 60 seconds                        ")
     print(" -cs     custom sql, this SELECT statement defines the output (see the -cs example below),     default: ''  (not used)                              ")
+    print(" -cq     custom queries, a list of queries that will be executed (-cd decides deliminiter mode also for -cq),              default: '' (not used)   ")
+    print(" -iq     custom query waits [comma seperated list (same length as -cq) of integers = seconds],                                                      ")
+    print("                                           for -rm = 1: time it waits after a custom query,             default: none, it must be defined           ")
+    print("                                           for -rm = 2: time it waits after a custom query,             default: none, it must be defined           ")
+    print("                                           for -rm = 3: -iq and -cq are not supported for -rm = 3                                                   ")
     print("         *** KILL SESSIONS (use with care!) ***                                                                                                     ")
     print(' -ks     kill session [list of "0","C", or "D"], list of the characters 0, C, or D (length of the list must be the same as number of features       ')
     print("         defined by -cf) that defines if -cf's features could indicate that the sessions (connections) should be tried to be cancelled (C), or      ")
@@ -266,6 +271,11 @@ class CustomSQLSetting:
         self.num_custom_sql_recordings = num_custom_sql_recordings
         self.custom_sql_interval = custom_sql_interval
         self.custom_sql_recording = custom_sql_recording
+
+class CustomQuerySetting:
+    def __init__(self, custom_queries, custom_query_waits):
+        self.custom_queries = custom_queries
+        self.custom_query_waits = custom_query_waits
 
 class EmailNotification:
     def __init__(self, receiverEmails, emailClient, senderEmail, mailServer, SID):
@@ -512,7 +522,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -601,7 +611,7 @@ def is_number(s):
         return False
 
 def prio_def(prio_number):
-    prios = {1:"RTE", 2:"Call Stacks", 3:"G-Stacks", 4:"Kernel Profiler", 5:"Custom SQL"}
+    prios = {1:"RTE", 2:"Call Stacks", 3:"G-Stacks", 4:"Kernel Profiler", 5:"Custom SELECT Output", 6:"Custom Queries"}
     return prios[prio_number]    
 
 def recording_prio_convert(recording_prio):
@@ -951,7 +961,16 @@ def record_customsql(customsql, hdbcons, comman):
     time.sleep(customsql.custom_sql_interval)
     return printout 
 
-def record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman):
+def record_customquer(custom_query, custom_query_wait, comman):
+    start_time = datetime.now()
+    customquer_output = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "'+custom_query+'"')
+    stop_time = datetime.now()
+    printout = "Custom Query      , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          ,   -        , "+custom_query+"   -->   Will now wait "+str(custom_query_wait)+" seconds"
+    log(printout, comman)
+    time.sleep(custom_query_wait)
+    return printout 
+
+def record(recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, hdbcons, comman):
     if recording_mode == 1:
         for p in recording_prio:
             if p == 1:
@@ -968,9 +987,12 @@ def record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recordi
                     record_kprof(kprofiler, hdbcons, comman)    
             if p == 5:                    
                 for i in range(customsql.num_custom_sql_recordings):    
-                    record_customsql(customsql, hdbcons, comman)    
+                    record_customsql(customsql, hdbcons, comman)
+            if p == 6:
+                for i in range(len(customquer.custom_queries)):
+                    record_customquer(customquer.custom_queries[i], customquer.custom_query_waits[i], comman)    
     elif recording_mode == 2:  
-        max_nbr_recordings = max(gstack.num_gstacks, kprofiler.num_kprofs, callstack.num_callstacks, rte.num_rtedumps)
+        max_nbr_recordings = max(gstack.num_gstacks, kprofiler.num_kprofs, callstack.num_callstacks, rte.num_rtedumps, customsql.num_custom_sql_recordings, len(customquer.custom_queries))
         for i in range(max_nbr_recordings):
             for p in recording_prio:
                 if p == 1:
@@ -988,7 +1010,10 @@ def record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recordi
                 if p == 5:    
                     if i < customsql.num_custom_sql_recordings:
                         record_customsql(customsql, hdbcons, comman)
-    else:
+                if p == 6:    
+                    if i < len(customquer.custom_queries):
+                        record_customquer(customquer.custom_queries[i], customquer.custom_query_waits[i], comman)
+    else: #for rm=3 customquer cannot be used since it has different statements
         record_in_parallel(rte, callstack, gstack, kprofiler, customsql, hdbcons, comman)
     return True
 
@@ -1007,7 +1032,7 @@ def record_in_parallel(rte, callstack, gstack, kprofiler, customsql, hdbcons, co
         if kprofiler.num_kprofs > i:
             rec_types.append((4, kprofiler, hdbcons, comman))   # 4 = Kernel Profiler
         if customsql.num_custom_sql_recordings > i:
-            rec_types.append((5, customsql, hdbcons, comman))   # 5 = Custom SQL
+            rec_types.append((5, customsql, hdbcons, comman))   # 5 = Custom SELECT Output
         results = pool.map(parallel_recording_wrapper, rec_types)
         if comman.std_out:
             for j in range(len(results)):
@@ -1030,7 +1055,7 @@ def parallel_recording(record_type, recorder, hdbcons, comman):
     else:
         return record_customsql(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
 
-def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, sccmanager, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons):   
+def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, critical_features, feature_check_timeout, cpu_check_params, sccmanager, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons):   
     recorded = False
     offline = False
     while not recorded:
@@ -1040,7 +1065,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
             return [False, False]
         # CPU CHECK
         if cpu_too_high(cpu_check_params, comman): #first check CPU with 'sar' (i.e. without contacting HANA) if it is too high, record without pinging or feature checking
-            recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
+            recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, hdbcons, comman)
         if not recorded:
             if ping_timeout != 0:   # possible to turn off PING check with -pt 0
                 # PING CHECK - to find either hanging or offline situations
@@ -1055,7 +1080,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                     comment = "DB responded faster than "+str(ping_timeout)+" seconds"
                 log("Ping Check        , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          , "+str(not hanging and not offline)+"       , "+comment, comman, sendEmail = hanging or offline) 
                 if hanging:
-                    recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
+                    recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, hdbcons, comman)
                 if offline:
                     return [recorded, offline]    # exit the tracker if HANA turns offline during tracking
         if not recorded:
@@ -1092,7 +1117,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                     if hanging or len(hostsWithWrongNbrCFs):
                         if host_mode:
                             hdbcons.hostsForRecording = hostsWithWrongNbrCFs
-                        recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
+                        recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, hdbcons, comman)
                         if cf.killSession != '0':
                             stop_session(cf, comman)
         if not recorded:
@@ -1100,7 +1125,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
             if sccmanager.min_avg_exec_time_diff_pct >= 0:
                 nbr_hashes_with_critical_engine_change = sqlCacheCheck(sccmanager, comman)
                 if nbr_hashes_with_critical_engine_change > 0:
-                    recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, hdbcons, comman)
+                    recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, hdbcons, comman)
         if not recorded:
             time.sleep(check_interval)
         #house keeping
@@ -1161,7 +1186,7 @@ def main():
     ping_timeout = 60 #seconds
     check_interval = 60 #seconds
     recording_mode = 1 # either 1, 2 or 3
-    recording_prio = ['1', '2', '3', '4', '5']   # 1=RTE, 2=CallStacks, 3=GStacks, 4=Kernel Profiler, 5=Custom SQL
+    recording_prio = ['1', '2', '3', '4', '5', '6']   # 1=RTE, 2=CallStacks, 3=GStacks, 4=Kernel Profiler, 5=Custom SELECT Output, 6=Custom Query
     host_mode = "false"
     num_rtedumps = 0 #how many rtedumps?
     rtedumps_interval = 60 #seconds
@@ -1169,6 +1194,8 @@ def main():
     num_custom_sql_recordings = 0  #how many custom sqls?
     custom_sql_interval = 60 #seconds
     custom_sql_recording = '' #custom sql dump
+    custom_queries = [] # default: no custom queries
+    custom_query_waits =  []
     num_callstacks = 0 #how many call stacks?
     callstacks_interval = 60 #seconds
     num_gstacks = 0  #how many call stacks?
@@ -1178,7 +1205,6 @@ def main():
     kprofs_duration = 60 #seconds
     kprofs_wait = 0 #milliseconds
     feature_check_timeout = 60 #seconds
-    #critical_features = ['M_SERVICE_THREADS','IS_ACTIVE','TRUE','30']  #one critical feature state with max allowed 30
     critical_features = [] # default: don't use critical feature check
     cf_texts = [] # default: no text
     kill_session = [] # default: do not kill any session
@@ -1258,6 +1284,15 @@ def main():
                     num_custom_sql_recordings           = getParameterFromFile(firstWord, '-ns', flagValue, flag_file, flag_log, num_custom_sql_recordings)
                     custom_sql_interval                 = getParameterFromFile(firstWord, '-is', flagValue, flag_file, flag_log, custom_sql_interval)
                     custom_sql_recording                = getParameterFromFile(firstWord, '-cs', flagValue, flag_file, flag_log, custom_sql_recording)
+                    deliminiter_mode = '1' # default: deliminiter is , 
+                    deliminiter_mode                    = getParameterFromFile(firstWord, '-cd', flag_log, deliminiter_mode)
+                    if deliminiter_mode == '2':    
+                        custom_queries                  = getParameterListFromFile(firstWord, '-cq', flagValue, flag_file, flag_log, custom_queries, ';')
+                    else:
+                        custom_queries                  = getParameterListFromFile(firstWord, '-cq', flagValue, flag_file, flag_log, custom_queries)
+                    if custom_queries == ['']:   # allow no custom queries with -cq ""
+                        custom_queries = []      # make the length 0 in case of -cq ""
+                    custom_query_waits                  = getParameterListFromFile(firstWord, '-iq', flagValue, flag_file, flag_log, custom_query_waits)
                     kill_session                        = getParameterListFromFile(firstWord, '-ks', flagValue, flag_file, flag_log, kill_session)
                     num_callstacks                      = getParameterFromFile(firstWord, '-nc', flagValue, flag_file, flag_log, num_callstacks)
                     callstacks_interval                 = getParameterFromFile(firstWord, '-ic', flagValue, flag_file, flag_log, callstacks_interval)
@@ -1267,9 +1302,7 @@ def main():
                     kprofs_interval                     = getParameterFromFile(firstWord, '-ip', flagValue, flag_file, flag_log, kprofs_interval)
                     kprofs_duration                     = getParameterFromFile(firstWord, '-dp', flagValue, flag_file, flag_log, kprofs_duration)
                     kprofs_wait                         = getParameterFromFile(firstWord, '-wp', flagValue, flag_file, flag_log, kprofs_wait)
-                    cf_deliminiter_mode = '1' # default: deliminiter is , 
-                    cf_deliminiter_mode                 = getParameterFromFile(firstWord, '-cd', flagValue, flag_file, flag_log, cf_deliminiter_mode)
-                    if cf_deliminiter_mode == '2':    
+                    if deliminiter_mode == '2':    
                         critical_features               = getParameterListFromFile(firstWord, '-cf', flagValue, flag_file, flag_log, critical_features, ';')
                     else:
                         critical_features               = getParameterListFromFile(firstWord, '-cf', flagValue, flag_file, flag_log, critical_features)
@@ -1318,6 +1351,15 @@ def main():
     num_custom_sql_recordings           = getParameterFromCommandLine(sys.argv, '-ns', flag_log, num_custom_sql_recordings)
     custom_sql_interval                 = getParameterFromCommandLine(sys.argv, '-is', flag_log, custom_sql_interval)
     custom_sql_recording                = getParameterFromCommandLine(sys.argv, '-cs', flag_log, custom_sql_recording)
+    deliminiter_mode = '1'       # default: deliminiter is , 
+    deliminiter_mode                    = getParameterFromCommandLine(sys.argv, '-cd', flag_log, deliminiter_mode)
+    if deliminiter_mode == '2':    
+        custom_queries                  = getParameterListFromCommandLine(sys.argv, '-cq', flag_log, custom_queries, ';')
+    else:
+        custom_queries                  = getParameterListFromCommandLine(sys.argv, '-cq', flag_log, custom_queries)
+    if custom_queries == ['']:   # allow no custom queries with -cq ""
+        custom_queries = []      # make the length 0 in case of -cq ""
+    custom_query_waits                  = getParameterListFromCommandLine(sys.argv, '-iq', flag_log, custom_query_waits)
     kill_session                        = getParameterListFromCommandLine(sys.argv, '-ks', flag_log, kill_session)
     num_callstacks                      = getParameterFromCommandLine(sys.argv, '-nc', flag_log, num_callstacks)
     callstacks_interval                 = getParameterFromCommandLine(sys.argv, '-ic', flag_log, callstacks_interval)
@@ -1327,9 +1369,7 @@ def main():
     kprofs_interval                     = getParameterFromCommandLine(sys.argv, '-ip', flag_log, kprofs_interval)
     kprofs_duration                     = getParameterFromCommandLine(sys.argv, '-dp', flag_log, kprofs_duration)
     kprofs_wait                         = getParameterFromCommandLine(sys.argv, '-wp', flag_log, kprofs_wait)
-    cf_deliminiter_mode = '1' # default: deliminiter is , 
-    cf_deliminiter_mode                 = getParameterFromCommandLine(sys.argv, '-cd', flag_log, cf_deliminiter_mode)
-    if cf_deliminiter_mode == '2':    
+    if deliminiter_mode == '2':    
         critical_features               = getParameterListFromCommandLine(sys.argv, '-cf', flag_log, critical_features, ';')
     else:
         critical_features               = getParameterListFromCommandLine(sys.argv, '-cf', flag_log, critical_features)
@@ -1562,15 +1602,15 @@ def main():
         print("INPUT ERROR: The -rm flag must be either 1, 2, or 3. Please see --help for more information.")
         os._exit(1)           
     ### recording_prio, -rp
-    if not len(recording_prio) == 5:
-        print("INPUT ERROR: The -rp flag must be followed by 5 items, seperated by comma. Please see --help for more information.")
+    if not len(recording_prio) == 6:
+        print("INPUT ERROR: The -rp flag must be followed by 6 items, seperated by comma. Please see --help for more information.")
         os._exit(1)
-    if not (recording_prio[0].isdigit() or recording_prio[1].isdigit() or recording_prio[2].isdigit() or recording_prio[3].isdigit() or recording_prio[4].isdigit()):
+    if not (recording_prio[0].isdigit() or recording_prio[1].isdigit() or recording_prio[2].isdigit() or recording_prio[3].isdigit() or recording_prio[4].isdigit() or recording_prio[5].isdigit()):
         print("INPUT ERROR: The -rp flag must be followed by positive integers, seperated by commas. Please see --help for more information.")
         os._exit(1)
     recording_prio = [int(rec) for rec in recording_prio]
-    if not (recording_prio[0] in [1,2,3,4,5] or recording_prio[1] in [1,2,3,4,5] or recording_prio[2] in [1,2,3,4,5] or recording_prio[3] in [1,2,3,4,5] or recording_prio[4] in [1,2,3,4,5]):
-        print("INPUT ERROR: The -rp flag must be followed by integers of the values withing [1-5]. Please see --help for more information.")
+    if not (recording_prio[0] in [1,2,3,4,5,6] or recording_prio[1] in [1,2,3,4,5,6] or recording_prio[2] in [1,2,3,4,5,6] or recording_prio[3] in [1,2,3,4,5,6] or recording_prio[4] in [1,2,3,4,5,6] or recording_prio[5] in [1,2,3,4,5,6]):
+        print("INPUT ERROR: The -rp flag must be followed by integers of the values withing [1-6]. Please see --help for more information.")
         os._exit(1)     
     if [rec for rec in recording_prio if recording_prio.count(rec) > 1]:
         print("INPUT ERROR: The -rp flag must not contain dublicates. Please see --help for more information.")
@@ -1623,6 +1663,18 @@ def main():
         if not custom_sql_recording[0:6].upper() == 'SELECT':
             log('INPUT ERROR: The -cs flag must be a SELECT statement. Please see --help for more information.', comman) 
             os._exit(1)
+    ### custom_query_waits, -iq
+    if len(custom_query_waits) != len(custom_queries):
+        log('INPUT ERROR: The -iq flag must be of the same length as -cq. Please see --help for more information.', comman)
+        os._exit(1)
+    for i in range(len(custom_query_waits)):
+        if not is_integer(custom_query_waits[i]):
+            log('INPUT ERROR: -iq must only contain integers. Please see --help for more information', comman)
+            os._exit(1)
+        custom_query_waits[i] = int(custom_query_waits[i])
+    if len(custom_query_waits) and recording_mode == 3:
+        log('INPUT ERROR: -cq and -iq are not supported for -rm = 3. Please see --help for more information', comman)
+        os._exit(1)
     ### num_callstacks, -nc
     if not is_integer(num_callstacks):
         log("INPUT ERROR: -nc must be an integer. Please see --help for more information.", comman)
@@ -1757,10 +1809,10 @@ def main():
         if any(not is_email(element) for element in receiver_emails):
             log("INPUT ERROR: some element(s) of -en is/are not email(s). Please see --help for more information.", comman)
             os._exit(1)
-    ### num_rtedumps, -nr, num_callstacks, -nc, num_gstacks, -ng, num_kprofs, -np, num_custom_sql_recordings, -ns, log_features, -lf, receiver_emails, -en
+    ### num_rtedumps, -nr, num_callstacks, -nc, num_gstacks, -ng, num_kprofs, -np, num_custom_sql_recordings, -ns, log_features, -lf, receiver_emails, -en, custom_queries, -cq
     if not kill_session:
-        if (num_rtedumps <= 0 and num_callstacks <= 0 and num_gstacks <= 0 and num_kprofs <= 0 and num_custom_sql_recordings <= 0 and log_features == False and not receiver_emails):
-            log("INPUT ERROR: No kill-session and no recording is specified (-nr, -nc, -ng, -np, and -ns are all <= 0, or none of them are specified and -lf = false) and no email receiver is specified. It then makes no sense to run hanasitter. Please see --help for more information.", comman)
+        if (num_rtedumps <= 0 and num_callstacks <= 0 and num_gstacks <= 0 and num_kprofs <= 0 and num_custom_sql_recordings <= 0 and log_features == False and not receiver_emails and not custom_queries):
+            log("INPUT ERROR: No kill-session and no recording is specified (-nr, -nc, -ng, -np, and -ns are all <= 0, or none of them are specified and -lf = false) and no email receiver nor custom query is specified. It then makes no sense to run hanasitter. Please see --help for more information.", comman)
             os._exit(1)
     ### email_client, -enc
     if email_client:
@@ -1848,7 +1900,10 @@ def main():
         log("RTE Dumps (light)   , "+str(num_rtedumps)+"                   ,   "+str(rtedumps_interval)+"                  ,   ", comman)
     log("Custom SQL          , "+str(num_custom_sql_recordings)+"                   ,   "+str(custom_sql_interval)+"                  ,   ", comman)
     if custom_sql_recording:
-        log("Custom SQL: "+custom_sql_recording, comman)
+        log("Custom SELECT Output: "+custom_sql_recording, comman)
+    if custom_queries:
+        for i in range(len(custom_queries)):
+            log('Custom Query: "'+custom_queries[i]+'" with wait: '+str(custom_query_waits[i])+' seconds', comman)
     log("Recording Priority: "+recording_prio_convert(recording_prio), comman)
     if int(cpu_check_params[0]) > 0:
         if int(cpu_check_params[0]) == 1:
@@ -1869,6 +1924,7 @@ def main():
     gstack = GStackSetting(num_gstacks, gstacks_interval)
     kprofiler = KernelProfileSetting(num_kprofs, kprofs_interval, kprofs_duration, kprofs_wait)
     customsql = CustomSQLSetting(num_custom_sql_recordings, custom_sql_interval, custom_sql_recording)
+    customquer = CustomQuerySetting(custom_queries, custom_query_waits)
     try:
         if num_kprofs: #only if we write kernel profiler dumps will we need temporary output folders
             hdbcons.create_temp_output_directories(host_check) #create temporary output folders
@@ -1876,7 +1932,7 @@ def main():
         while True: 
             if is_online(local_dbinstance, comman) and not is_secondary(comman):
                 wasOnline = True
-                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, recording_prio, critical_features, feature_check_timeout, cpu_check_params, sccmanager, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons)
+                [recorded, offline] = tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, critical_features, feature_check_timeout, cpu_check_params, sccmanager, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons)
                 if recorded:
                     if after_recorded < 0: #if after_recorded is negative we want to exit after a recording
                         hdbcons.clear()    #remove temporary output folders before exit
