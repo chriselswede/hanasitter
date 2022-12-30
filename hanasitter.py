@@ -1506,6 +1506,8 @@ def main():
     sccmanager = SCCManager(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len)
     ### log_features, -lf
     log_features = checkAndConvertBooleanFlag(log_features, "-lf")
+    if log_features:
+        log("WARNING: -lf is turned on. Are you sure?")
     if log_features and len(critical_features) == 0:
         log("INPUT ERROR: -lf is True even though -cf is empty, i.e. no critical feature specified. This does not make sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
         os._exit(1) 
