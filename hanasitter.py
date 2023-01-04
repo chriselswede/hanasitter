@@ -1542,7 +1542,7 @@ def main():
     tenantDBNames = [line.split(' ')[0].replace('adm','').replace('usr','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated (below we get the names in case of low isolated)
     output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'/lock').splitlines(1)
     if not output:
-        run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain+'/lock').splitlines(1)
+        output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain+'/lock').splitlines(1)
         if not output:
             print("ERROR: The lock was not find in either \n"+cdalias('cdhdb', local_dbinstance, shell)+local_host+"\n nor in \n"+cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain+"\n Check your key")
             os._exit(1)
