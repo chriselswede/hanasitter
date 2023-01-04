@@ -1418,6 +1418,12 @@ def main():
     key_environment = [ke for ke in key_environment if ke and not ke == 'Operation succeed.']
     ENV = key_environment[1].replace('  ENV : ','').replace(';',',').split(',')
     key_hosts = [env.split(':')[0].split('.')[0] for env in ENV]  #if full host name is specified in the Key, only the first part is used
+    key_domains = [env.split(':')[0].split('.')[1:] for env in ENV]
+    key_domains = ['.'.join(kd) for kd in key_domains] 
+    if not all(kd==key_domains[0] for kd in key_domains):
+        print("ERROR, the key ", dbuserkey, " is defining ENV with different host domains. They should be all equal.")
+        os._exit(1)
+    key_domain = key_domains[0]  #this is empty if domains not specified in the key
     if not local_host in key_hosts and not 'localhost' in key_hosts:
         #Turned out this check was not needed. A user that executed HANASitter from a non-possible future master with virtual host name virt2 only wanted
         #possible future masters in the hdbuserstore:   virt1:30413,virt3:30413,virt4:30413, so he executed HANASitter on virt2 with  -vlh virt2  --> worked fine
@@ -1535,6 +1541,11 @@ def main():
     tenantIndexserverPorts = [line.split(' ')[-1].strip('\n') for line in output if "hdbindexserver -port" in line]
     tenantDBNames = [line.split(' ')[0].replace('adm','').replace('usr','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated (below we get the names in case of low isolated)
     output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'/lock').splitlines(1)
+    if not output:
+        run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain+'/lock').splitlines(1)
+        if not output:
+            print("ERROR: The lock was not find in either \n"+cdalias('cdhdb', local_dbinstance, shell)+local_host+"\n nor in \n"+cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain+"\n Check your key")
+            os._exit(1)
     nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
     if not tenantDBNames:
         print("WARNING: Something went wrong, it passed online tests but still no tenant names were found. Is this HANA 1? HANA 1 is not supported as of May 2021.")
