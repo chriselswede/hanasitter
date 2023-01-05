@@ -697,6 +697,20 @@ def getParameterListFromCommandLine(sysargv, flag_string, flag_log, parameter, d
         flag_log[flag_string] = [','.join(parameter), "command line"]
     return parameter
 
+def get_host_folder(local_dbinstance, local_host, key_domain, shell):
+    output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host).splitlines(1)
+    if not output and not key_domain:
+        print("ERROR: The host folder was not found as \n"+cdalias('cdhdb', local_dbinstance, shell)+local_host+"\nIf that folder contains the domain on your system, then provide the domain in ENV in the Key.")
+        os._exit(1)
+    elif not output:
+        output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain).splitlines(1)
+        if not output:
+            print("ERROR: The host folder was not found neither as \n"+cdalias('cdhdb', local_dbinstance, shell)+local_host+"\n nor as \n"+cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain+"\nCheck your key")
+            os._exit(1)
+        else:
+            return cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain
+    return cdalias('cdhdb', local_dbinstance, shell)+local_host
+
 def cpu_too_high(cpu_check_params, comman):
     any_cpu_too_high = False
     input_cpu_type = int(cpu_check_params[0])
@@ -1540,20 +1554,16 @@ def main():
     output = run_command('HDB info').splitlines(1)
     tenantIndexserverPorts = [line.split(' ')[-1].strip('\n') for line in output if "hdbindexserver -port" in line]
     tenantDBNames = [line.split(' ')[0].replace('adm','').replace('usr','').upper() for line in output if "hdbindexserver -port" in line]  # only works if high-isolated (below we get the names in case of low isolated)
-    output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'/lock').splitlines(1)
-    if not output:
-        output = run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain+'/lock').splitlines(1)
-        if not output:
-            print("ERROR: The lock was not find in either \n"+cdalias('cdhdb', local_dbinstance, shell)+local_host+"\n nor in \n"+cdalias('cdhdb', local_dbinstance, shell)+local_host+'.'+key_domain+"\n Check your key")
-            os._exit(1)
-    nameserverPort = [line.split('@')[1].replace('.pid','') for line in output if "hdbnameserver" in line][0].strip('\n') 
+    host_folder = get_host_folder(local_dbinstance, local_host, key_domain, shell)
+    lock_content = run_command('ls -l '+host_folder+'/lock').splitlines(1)
+    nameserverPort = [line.split('@')[1].replace('.pid','') for line in lock_content if "hdbnameserver" in line][0].strip('\n') 
     if not tenantDBNames:
         print("WARNING: Something went wrong, it passed online tests but still no tenant names were found. Is this HANA 1? HANA 1 is not supported as of May 2021.")
         #os._exit(1)
     ### TENANT NAMES for NON HIGH-ISOLATED MDC ###
     if is_mdc:
         if tenantDBNames.count(tenantDBNames[0]) == len(tenantDBNames) and tenantDBNames[0] == SID:   # if all tenant names are equal and equal to SystemDB's SID, then it is non-high-isolation --> get tenant names using daemon instead
-            [tenantDBNames, tenantIndexserverPorts] = tenant_names_and_ports(cdalias('cdhdb', local_dbinstance, shell)+local_host+"/daemon.ini") # if non-high isolation the tenantIndexserverPorts from HDB info could be wrong order
+            [tenantDBNames, tenantIndexserverPorts] = tenant_names_and_ports(host_folder+"/daemon.ini") # if non-high isolation the tenantIndexserverPorts from HDB info could be wrong order
 
     ####### COMMUNICATION PORT (i.e. nameserver port if SystemDB at MDC, or indexserver port if TenantDB and if non-MDC) ########
     communicationPort = "-1"
@@ -1589,7 +1599,7 @@ def main():
     ### HOST(S) USED BY THIS DB ###
     used_hosts = []
     for potential_host in hosts_worker_and_standby:        
-        if '@'+communicationPort in run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+potential_host+'/lock'):
+        if '@'+communicationPort in run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+potential_host+'/lock') or '@'+communicationPort in run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+potential_host+'.'+key_domain+'/lock'):
             used_hosts.append(potential_host) 
         
     ############ CHECK AND CONVERT THE REST OF THE INPUT PARAMETERS ################
