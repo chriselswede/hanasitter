@@ -1299,7 +1299,7 @@ def main():
                     custom_sql_interval                 = getParameterFromFile(firstWord, '-is', flagValue, flag_file, flag_log, custom_sql_interval)
                     custom_sql_recording                = getParameterFromFile(firstWord, '-cs', flagValue, flag_file, flag_log, custom_sql_recording)
                     deliminiter_mode = '1' # default: deliminiter is , 
-                    deliminiter_mode                    = getParameterFromFile(firstWord, '-cd', flag_log, deliminiter_mode)
+                    deliminiter_mode                    = getParameterFromFile(firstWord, '-cd', flagValue, flag_file, flag_log, deliminiter_mode)
                     if deliminiter_mode == '2':    
                         custom_queries                  = getParameterListFromFile(firstWord, '-cq', flagValue, flag_file, flag_log, custom_queries, ';')
                     else:
