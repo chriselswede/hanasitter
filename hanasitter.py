@@ -206,6 +206,9 @@ def printHelp():
     print("         5 times there will be printouts from the SQL plan cache ±5 hours around the engine changes, and an email will be send)                     ")
     print("  > python hanasitter.py -sc 6 -scc 5 -scp 5 -en christian.hansen01@sap.com -k T1KEY                                                                ")
     print("                                                                                                                                                    ")
+    print("EXAMPLE (if there is any user with more threads than 5, then record a call stack)                                                                   ")
+    print('  > python hanasitter.py -k T1KEY -cf "M_SERVICE_THREADS,WHERE,USER_NAME <> '' group by USER_NAME,5" -nc 1                                          ')
+    print("                                                                                                                                                    ")
     print("CURRENT KNOWN LIMITATIONS (i.e. TODO LIST):                                                                                                         ")
     print(" 1. Record in parallel for different Scale-Out Nodes   (should work for some recording types, e.g. RTE dumps -->  TODO)                             ")
     print(" 2. If a CPU only happens on one Host, possible to record on only one Host --> not possible to do this with SAR                                     ")                                   
@@ -361,7 +364,11 @@ class HDBCONS:
                 print("WARNING, local host: ", self.local_host, ", should be part of cdtrace: ", cdtrace_path_local, ". It is not. Continue at your own risk!")
         for host in self.hosts:
             #Let us try temp directories without time stamp, only date:
-            self.temp_host_output_dirs.append(cdtrace_path_local.replace(self.local_host, host)+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d")+"/")
+            if len(self.local_host.split('.')) > 1:
+                replace_host = host
+            else:
+                replace_host = host.split('.')[0]
+            self.temp_host_output_dirs.append(cdtrace_path_local.replace(self.local_host, replace_host)+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d")+"/")
         for path in self.temp_host_output_dirs:
             if not os.path.exists(path):
                 dummyout = run_command("mkdir "+path)
@@ -1601,7 +1608,6 @@ def main():
     for potential_host in hosts_worker_and_standby:        
         if '@'+communicationPort in run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+potential_host+'/lock') or '@'+communicationPort in run_command('ls -l '+cdalias('cdhdb', local_dbinstance, shell)+potential_host+'.'+key_domain+'/lock'):
             used_hosts.append(potential_host) 
-        
     ############ CHECK AND CONVERT THE REST OF THE INPUT PARAMETERS ################
     ### ping_timeout, -pt
     if not is_integer(ping_timeout):
