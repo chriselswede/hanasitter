@@ -72,6 +72,13 @@ def printHelp():
     print(" -ci     check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
     print(" -ar     time to sleep after recording [seconds], if negative it exits, default: -1                                                                 ")
     print("         *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps and/or Output from Custom SQL) ***               ")
+    print(" -sv     service [hdbcompileserver, hdbpreprocessor, hdbdocstore, hdbdpserver, hdbscriptserver, hdbxsengine, hdbdiserver, or hdbwebdispatcher],     ")
+    print("         the service that hdbcons will connect to in case different from indexserver or nameserver,  default = hdbnameserver (see SAP Note 2410143) ")
+    print("         Note: default hdbcons opens in nameserver, i.e. SDB, and dumps based on the port from the key, that could be an indexserver of a tenant    ")
+    print("               or the nameserver of the SDB, therefore the hdbcons option -d, see SAP Note 2222218, is not needed, and not used                     ")
+    print("         Note: If you want to record (dump) from either an indexserver of a tenant and/or the nameserver of the systemdb, then don't use -sv,       ")
+    print("               instead simply let -sv default and specify the indexserver(s) and/or nameserver with the port(s) of the key(s)                       ")
+    print("         Note: -sv different from default is not supported for scale-out systems (for now)                                                          ")
     print(" -rm     recording mode [1, 2 or 3], 1 = each requested recording types are done one after each other with the order above,                         ")
     print("                                         e.g. GStack 1, GStack 2, ..., GStack N, RTE 1, RTE 2, ..., RTE N   (this is default)                       ")
     print("                                     2 = the recordings of each requested recording types are done after each other with the                        ")
@@ -330,7 +337,7 @@ class Tenant:
         return str(self.indexserverPort)
         
 class HDBCONS:
-    def __init__(self, local_host, hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName = None, shell = '/bin/bash'):
+    def __init__(self, local_host, hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, hdbservice, tenantDBName = None, shell = '/bin/bash'):
         self.local_host = local_host
         self.local_dbinstance = local_dbinstance
         self.hosts = hosts
@@ -346,14 +353,22 @@ class HDBCONS:
         # SET HDBCONS STRINGS
         self.hdbcons_strings = []
         self.shell = shell
+        self.hdbservice = hdbservice
         for host in self.hosts:
-            if not self.is_mdc:       # not MDC
-                if not self.is_scale_out:
+            if not self.is_mdc:       # not MDC   (depricated? remote?)
+                if not self.is_scale_out:  
                     self.hdbcons_strings.append('hdbcons "')
                 else:
                     self.hdbcons_strings.append('hdbcons "distribute exec '+host+':'+self.communicationPort+' ')                # SAP Note 2222218
             else:                       # MDC (both SystemDB and Tenant)
-                self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+self.communicationPort+' ')   # SAP Notes 2222218 and 2410143
+                if self.hdbservice == 'hdbnameserver': # hdbcons opens on the nameserver, but the port decides on what service (an indexserver or the nameserver) the dump is done on
+                    self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+self.communicationPort+' ')   # SAP Notes 2222218 and 2410143
+                else:
+                    if self.is_scale_out:  # double-check
+                        print("INPUT ERROR: -sv different from default is not supported for scale-out. Please see --help for more information.")
+                        os._exit(1)
+                    self.hdbcons_strings.append('hdbcons -e '+self.hdbservice+' "')   # SAP Note 2222218
+
     def create_temp_output_directories(self, host_check): # CREATE TEMPORARY OUTPUT DIRECTORIES and SET PRIVILEGES (CHMOD)
         cdtrace_path_local = cdalias('cdtrace', self.local_dbinstance, self.shell)
         if not self.local_host in cdtrace_path_local:
@@ -529,7 +544,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -947,12 +962,16 @@ def record_rtedump(rtedumps_interval, hdbcons, comman):
     for hdbcon_string, host in zip(hdbcons.hdbcons_strings, hdbcons.hosts):
         if host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
+            if hdbcons.hdbservice == 'hdbnameserver':
+                service_port = hdbcons.communicationPort
+            else:
+                service_port = hdbcons.hdbservice
             start_time = datetime.now()
             if hdbcons.rte_mode == 0: # normal rte dump
-                filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+service_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
                 os.system(hdbcon_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
             elif hdbcons.rte_mode == 1: # light rte dump 
-                filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+service_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
                 os.system(hdbcon_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
                 os.system(hdbcon_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
                 os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
@@ -1232,6 +1251,7 @@ def main():
     kill_session = [] # default: do not kill any session
     intervals_of_features = [] #default only one check per feature
     after_recorded = -1 #default: exits after recorded
+    hdbservice = 'hdbnameserver'
     std_out = "true" #print to std out
     out_dir = "/tmp/hanasitter_output"
     log_dir = "/tmp/hanasitter_output"
@@ -1332,6 +1352,7 @@ def main():
                     intervals_of_features               = getParameterListFromFile(firstWord, '-if', flagValue, flag_file, flag_log, intervals_of_features)
                     feature_check_timeout               = getParameterFromFile(firstWord, '-tf', flagValue, flag_file, flag_log, feature_check_timeout)
                     after_recorded                      = getParameterFromFile(firstWord, '-ar', flagValue, flag_file, flag_log, after_recorded)
+                    hdbservice                          = getParameterFromFile(firstWord, '-sv', flagValue, flag_file, flag_log, hdbservice)
                     out_dir                             = getParameterFromFile(firstWord, '-od', flagValue, flag_file, flag_log, out_dir)
                     minRetainedOutputDays               = getParameterFromFile(firstWord, '-odr', flagValue, flag_file, flag_log, minRetainedOutputDays)
                     log_dir                             = getParameterFromFile(firstWord, '-ol', flagValue, flag_file, flag_log, log_dir)
@@ -1401,6 +1422,7 @@ def main():
     intervals_of_features               = getParameterListFromCommandLine(sys.argv, '-if', flag_log, intervals_of_features)
     feature_check_timeout               = getParameterFromCommandLine(sys.argv, '-tf', flag_log, feature_check_timeout)
     after_recorded                      = getParameterFromCommandLine(sys.argv, '-ar', flag_log, after_recorded)
+    hdbservice                          = getParameterFromCommandLine(sys.argv, '-sv', flag_log, hdbservice)
     out_dir                             = getParameterFromCommandLine(sys.argv, '-od', flag_log, out_dir)
     minRetainedOutputDays               = getParameterFromCommandLine(sys.argv, '-odr', flag_log, minRetainedOutputDays)
     log_dir                             = getParameterFromCommandLine(sys.argv, '-ol', flag_log, log_dir)
@@ -1755,6 +1777,15 @@ def main():
         log("INPUT ERROR: -ar must be an integer. Please see --help for more information.", comman)
         os._exit(1)
     after_recorded = int(after_recorded)
+    ### hdbservice, -sv  (default = hdbnameserver --> hdbcons opens in nameserver, i.e. SDB, and dumps based on the port, 
+    #                     that could be an indexserver or the nameserver, i.e. -d, see SAP Note 2222218, is not used)
+    if not hdbservice in ['hdbnameserver', 'hdbcompileserver', 'hdbpreprocessor', 'hdbdocstore', 'hdbdpserver', 'hdbscriptserver', 'hdbxsengine', 'hdbdiserver', 'hdbwebdispatcher']:
+        log("INPUT ERROR: -sv is not one of the valid values. Please see --help for more information.", comman)
+        os._exit(1)
+    if not hdbservice == 'hdbnameserver':
+        if (len(used_hosts) > 1):
+            log("INPUT ERROR: -sv different from default is not supported for scale-out. Please see --help for more information.", comman)
+            os._exit(1)  
     ### minRetainedOutputDays, -odr
     if not is_integer(minRetainedOutputDays):
         log("INPUT ERROR: -odr must be an integer. Please see --help for more information.", comman)
@@ -1880,7 +1911,7 @@ def main():
         emailNotification = EmailNotification(receiver_emails, email_client, senders_email, mail_server, SID)
 
     ### FILL HDBCONS STRINGS ###
-    hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, tenantDBName, shell)
+    hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, hdbservice, tenantDBName, shell)
 
     ################ START #################
     if is_mdc:
