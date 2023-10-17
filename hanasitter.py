@@ -337,13 +337,12 @@ class Tenant:
         return str(self.indexserverPort)
         
 class HDBCONS:
-    def __init__(self, local_host, hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, hdbservice, tenantDBName = None, shell = '/bin/bash'):
+    def __init__(self, local_host, hosts, local_dbinstance, is_tenant, communicationPort, SID, rte_mode, hdbservice, tenantDBName = None, shell = '/bin/bash'):
         self.local_host = local_host
         self.local_dbinstance = local_dbinstance
         self.hosts = hosts
         self.hostsForRecording = hosts # at first assume all, also true unloss host_mode 
         self.is_scale_out = (len(hosts) > 1)
-        self.is_mdc = is_mdc
         self.is_tenant = is_tenant
         self.communicationPort = communicationPort
         self.SID = SID
@@ -355,19 +354,13 @@ class HDBCONS:
         self.shell = shell
         self.hdbservice = hdbservice
         for host in self.hosts:
-            if not self.is_mdc:       # not MDC   (depricated? remote?)
-                if not self.is_scale_out:  
-                    self.hdbcons_strings.append('hdbcons "')
-                else:
-                    self.hdbcons_strings.append('hdbcons "distribute exec '+host+':'+self.communicationPort+' ')                # SAP Note 2222218
-            else:                       # MDC (both SystemDB and Tenant)
-                if self.hdbservice == 'hdbnameserver': # hdbcons opens on the nameserver, but the port decides on what service (an indexserver or the nameserver) the dump is done on
-                    self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+self.communicationPort+' ')   # SAP Notes 2222218 and 2410143
-                else:
-                    if self.is_scale_out:  # double-check
-                        print("INPUT ERROR: -sv different from default is not supported for scale-out. Please see --help for more information.")
-                        os._exit(1)
-                    self.hdbcons_strings.append('hdbcons -e '+self.hdbservice+' "')   # SAP Note 2222218
+            if self.hdbservice == 'hdbnameserver': # hdbcons opens on the nameserver, but the port decides on what service (an indexserver or the nameserver) the dump is done on
+                self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+self.communicationPort+' ')   # SAP Notes 2222218 and 2410143
+            else:
+                if self.is_scale_out:  # double-check
+                    print("INPUT ERROR: -sv different from default is not supported for scale-out. Please see --help for more information.")
+                    os._exit(1)
+                self.hdbcons_strings.append('hdbcons -e '+self.hdbservice+' "')   # SAP Note 2222218
 
     def create_temp_output_directories(self, host_check): # CREATE TEMPORARY OUTPUT DIRECTORIES and SET PRIVILEGES (CHMOD)
         cdtrace_path_local = cdalias('cdtrace', self.local_dbinstance, self.shell)
@@ -1578,7 +1571,9 @@ def main():
         time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
 
     ### MDC or not, SystemDB or Tenant ### 
-    is_mdc = is_multitenant_database_container(local_dbinstance, shell)
+    if not is_multitenant_database_container(local_dbinstance, shell):
+        log("COMPATIBILITY ERROR: This is not MDC. Is this HANA 1? HANA 1 is not supported as of May 2021.", comman)
+        os._exit(1)
 
     tenantIndexserverPorts = []  
     output = run_command('HDB info').splitlines(1)
@@ -1591,28 +1586,21 @@ def main():
         print("WARNING: Something went wrong, it passed online tests but still no tenant names were found. Is this HANA 1? HANA 1 is not supported as of May 2021.")
         #os._exit(1)
     ### TENANT NAMES for NON HIGH-ISOLATED MDC ###
-    if is_mdc:
-        if tenantDBNames.count(tenantDBNames[0]) == len(tenantDBNames) and tenantDBNames[0] == SID:   # if all tenant names are equal and equal to SystemDB's SID, then it is non-high-isolation --> get tenant names using daemon instead
-            [tenantDBNames, tenantIndexserverPorts] = tenant_names_and_ports(host_folder+"/daemon.ini") # if non-high isolation the tenantIndexserverPorts from HDB info could be wrong order
+    if tenantDBNames.count(tenantDBNames[0]) == len(tenantDBNames) and tenantDBNames[0] == SID:   # if all tenant names are equal and equal to SystemDB's SID, then it is non-high-isolation --> get tenant names using daemon instead
+        [tenantDBNames, tenantIndexserverPorts] = tenant_names_and_ports(host_folder+"/daemon.ini") # if non-high isolation the tenantIndexserverPorts from HDB info could be wrong order
 
     ####### COMMUNICATION PORT (i.e. nameserver port if SystemDB at MDC, or indexserver port if TenantDB and if non-MDC) ########
     communicationPort = "-1"
     tenantDBName = None
     is_tenant = False
-    if is_mdc:
-        for dbname, port in zip(tenantDBNames, tenantIndexserverPorts):
-            testTenant = Tenant(dbname, port, local_dbinstance, SID)
-            if testTenant.sqlPort == int(local_sqlport) or testTenant.DBName == DATABASE:     # then the sql port provided in hdbuserstore key is a tenant, or we checking the database name                   
-                tenantDBName = testTenant.DBName
-                is_tenant = True
-                communicationPort = testTenant.getIndexserverPortString()          # indexserver port for the tenant
-        if not is_tenant:
-            communicationPort = nameserverPort                                     # nameserver port for SystemDB
-    else:
-        communicationPort = "3"+local_dbinstance+"03"                              # indexserver port for non-MDC
-        if local_sqlport != "3"+local_dbinstance+"15":
-            print("ERROR: The sqlport provided with the user key, "+dbuserkey+", is wrong. For non-MDC it must be 3<inst-nbr>15, but it is "+local_sqlport+".\nNOTE: MDC systems must show hdbindexserver -port when HDB info is executed, otherwise it is not supported by HANASitter.")
-            os._exit(1)
+    for dbname, port in zip(tenantDBNames, tenantIndexserverPorts):
+        testTenant = Tenant(dbname, port, local_dbinstance, SID)
+        if testTenant.sqlPort == int(local_sqlport) or testTenant.DBName == DATABASE:     # then the sql port provided in hdbuserstore key is a tenant, or we checking the database name                   
+            tenantDBName = testTenant.DBName
+            is_tenant = True
+            communicationPort = testTenant.getIndexserverPortString()          # indexserver port for the tenant
+    if not is_tenant:
+        communicationPort = nameserverPort                                     # nameserver port for SystemDB
 
     ### SCALE OUT or Single Host ###
     hosts_worker_and_standby = run_command('sapcontrol -nr '+local_dbinstance+' -function GetSystemInstanceList').splitlines(1)
@@ -1911,23 +1899,19 @@ def main():
         emailNotification = EmailNotification(receiver_emails, email_client, senders_email, mail_server, SID)
 
     ### FILL HDBCONS STRINGS ###
-    hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_mdc, is_tenant, communicationPort, SID, rte_mode, hdbservice, tenantDBName, shell)
+    hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_tenant, communicationPort, SID, rte_mode, hdbservice, tenantDBName, shell)
 
     ################ START #################
-    if is_mdc:
-        if is_tenant:
-            printout = "Host = "+str(local_host)+", SID = "+SID+", DB Instance = "+str(local_dbinstance)+", MDC tenant = "+tenantDBName+", Indexserver Port = "+str(communicationPort)
-        else:
-            printout = "Host = "+str(local_host)+", SID = "+SID+", DB Instance = "+str(local_dbinstance)+", MDC SystemDB, Nameserver Port = "+str(communicationPort)
+    if is_tenant:
+        printout = "Host = "+str(local_host)+", SID = "+SID+", DB Instance = "+str(local_dbinstance)+", MDC tenant = "+tenantDBName+", Indexserver Port = "+str(communicationPort)
     else:
-        printout = "Host = "+str(local_host)+", SID = "+SID+", DB Instance = "+str(local_dbinstance)            
+        printout = "Host = "+str(local_host)+", SID = "+SID+", DB Instance = "+str(local_dbinstance)+", MDC SystemDB, Nameserver Port = "+str(communicationPort)           
     if (len(hosts_worker_and_standby) > 1):
         printout += "\nScale Out DB System with hosts: "+", ".join([h for h in hosts_worker_and_standby])
-        if is_mdc:
-            if is_tenant:        
-                printout += "\nTenant DB "+tenantDBName+"@"+SID+" uses host(s): "+", ".join([h for h in used_hosts])
-            else:
-                printout += "\nSystemDB@"+SID+" uses host(s): "+", ".join([h for h in used_hosts])
+        if is_tenant:        
+            printout += "\nTenant DB "+tenantDBName+"@"+SID+" uses host(s): "+", ".join([h for h in used_hosts])
+        else:
+            printout += "\nSystemDB@"+SID+" uses host(s): "+", ".join([h for h in used_hosts])
     log(printout, comman)       
     log("Online, Primary and Not-Secondary Check: Interval = "+str(online_test_interval)+" seconds", comman)
     if ping_timeout == 0:
