@@ -72,13 +72,13 @@ def printHelp():
     print(" -ci     check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
     print(" -ar     time to sleep after recording [seconds], if negative it exits, default: -1                                                                 ")
     print("         *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps and/or Output from Custom SQL) ***               ")
-    print(" -sv     service [hdbcompileserver, hdbpreprocessor, hdbdocstore, hdbdpserver, hdbscriptserver, hdbxsengine, hdbdiserver, or hdbwebdispatcher],     ")
-    print("         the service that hdbcons will connect to in case different from indexserver or nameserver,  default = hdbnameserver (see SAP Note 2410143) ")
-    print("         Note: default hdbcons opens in nameserver, i.e. SDB, and dumps based on the port from the key, that could be an indexserver of a tenant    ")
-    print("               or the nameserver of the SDB, therefore the hdbcons option -d, see SAP Note 2222218, is not needed, and not used                     ")
-    print("         Note: If you want to record (dump) from either an indexserver of a tenant and/or the nameserver of the systemdb, then don't use -sv,       ")
-    print("               instead simply let -sv default and specify the indexserver(s) and/or nameserver with the port(s) of the key(s)                       ")
-    print("         Note: -sv different from default is not supported for scale-out systems (for now)                                                          ")
+    print(" -sv     services [indexserver, nameserver, compileserver, preprocessor, docstore, dpserver, scriptserver, xsengine, diserver, and/or webdispatcher]")
+    print("         the service(s) that hdbcons will connect to for recording,    default = ''   (connect to the SQL port in the key)                          ")
+    print("         Note: for only recording from an indexserver or nameserver it is better simply specify the port(s) in the key(s), i.e. then do not use -sv ")
+    print("         Note: see SAP Notes 2222218 and 2410143 for more info                                                                                      ")
+    print(" -svp    print found services [true/false], the ports of the services requested by -sv must be found using trace files (cannot use SQL since cannot ")
+    print("         assume HANA is up), if no proper trace file is found that service will be ignored, therefore it could be useful to print all the found     ")
+    print("         services and respective ports, default: false                                                                                              ")
     print(" -rm     recording mode [1, 2 or 3], 1 = each requested recording types are done one after each other with the order above,                         ")
     print("                                         e.g. GStack 1, GStack 2, ..., GStack N, RTE 1, RTE 2, ..., RTE N   (this is default)                       ")
     print("                                     2 = the recordings of each requested recording types are done after each other with the                        ")
@@ -129,11 +129,11 @@ def printHelp():
     print("         Note: Requires SESSION ADMIN                                                                                                               ")
     print("         *** ADMINS (Output Directory, Logging, Output and DB User) ***                                                                             ")
     print(" -od     output directory, full path of the folder where output files will end up (if the folder does not exist it will be created),                ")
-    print("         default: '/tmp/hanasitter_output'   (i.e. same as for -ol)                                                                                 ")
+    print("         default: '/tmp/hanasitter_out'   (i.e. same as for -ol)                                                                                    ")
     print(" -odr    output retention days, output files in the path specified with -od are only saved for this number of days, default: -1 (not used)          ")
     print("         NOTE: -od and -odr holds for hanasitter logs also if -ol and -olr are not specified.                                                       ")
     print(" -ol     log output directory, full path of the folder where HANASitter log files will end up (if the folder does not exist it will be created),    ")
-    print("         default: '/tmp/hanasitter_output'   (i.e. same as for -od)                                                                                 ")
+    print("         default: '/tmp/hanasitter_out'   (i.e. same as for -od)                                                                                    ")
     print(" -olr    log retention days, hanasitterlogs in the path specified with -ol are only saved for this number of days, default: -1 (not used)           ")
     print(" -oc     output configuration [true/false], logs all parameters set by the flags and where the flags were set, i.e. what flag file                  ")
     print("         (one of the files listed in -ff) or if it was set via a flag specified on the command line, default = false                                ")
@@ -336,33 +336,35 @@ class Tenant:
     def getIndexserverPortString(self):
         return str(self.indexserverPort)
         
-class HDBCONS:
-    def __init__(self, local_host, hosts, local_dbinstance, is_tenant, communicationPort, SID, rte_mode, hdbservice, tenantDBName = None, shell = '/bin/bash'):
+class HdbconsManager:
+    def __init__(self, local_host, used_hosts, local_dbinstance, is_tenant, communicationPort, SID, rte_mode, tenantDBName = None, shell = '/bin/bash'):
         self.local_host = local_host
+        self.used_hosts = used_hosts
         self.local_dbinstance = local_dbinstance
-        self.hosts = hosts
-        self.hostsForRecording = hosts # at first assume all, also true unloss host_mode 
-        self.is_scale_out = (len(hosts) > 1)
         self.is_tenant = is_tenant
         self.communicationPort = communicationPort
         self.SID = SID
-        self.tenantDBName = tenantDBName
         self.rte_mode = rte_mode
-        self.temp_host_output_dirs = []
-        # SET HDBCONS STRINGS
-        self.hdbcons_strings = []
+        self.tenantDBName = tenantDBName
         self.shell = shell
-        self.hdbservice = hdbservice
-        for host in self.hosts:
-            if self.hdbservice == 'hdbnameserver': # hdbcons opens on the nameserver, but the port decides on what service (an indexserver or the nameserver) the dump is done on
-                self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+self.communicationPort+' ')   # SAP Notes 2222218 and 2410143
-            else:
-                if self.is_scale_out:  # double-check
-                    print("INPUT ERROR: -sv different from default is not supported for scale-out. Please see --help for more information.")
-                    os._exit(1)
-                self.hdbcons_strings.append('hdbcons -e '+self.hdbservice+' "')   # SAP Note 2222218
-
-    def create_temp_output_directories(self, host_check): # CREATE TEMPORARY OUTPUT DIRECTORIES and SET PRIVILEGES (CHMOD)
+        self.hostsForRecording = used_hosts # at first assume all, also true unless host_mode 
+        # Below lists must have the same length, since they will get zipped
+        self.hdbcons_hosts = []
+        self.hdbcons_ports = []
+        self.hdbcons_services = []
+        self.hdbcons_strings = []
+        self.hdbcons_temp_output_dirs = []
+    def create_hdbcons_string(self, host, port, service):
+        self.hdbcons_hosts.append(host)
+        self.hdbcons_ports.append(port)
+        self.hdbcons_services.append(service)
+        self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+port+' ')  # SAP Notes 2222218 and 2410143
+    def print_service_host_ports(self):
+        print("Services to record from:")
+        print("Host:                         Service:                      Port:                         Host:Port")
+        for host, service, port in zip(self.hdbcons_hosts, self.hdbcons_services, self.hdbcons_ports):
+            print(host+' '*(30-len(host)) + service+' '*(30-len(service)) + port+' '*(30-len(port)) + host+":"+port+' '*(30-len(host+":"+port)))
+    def create_temp_output_directories(self, host_check): # CREATE TEMPORARY OUTPUT DIRECTORIES and SET PRIVILEGES (CHMOD) only if we write kernel profiler
         cdtrace_path_local = cdalias('cdtrace', self.local_dbinstance, self.shell)
         if not self.local_host in cdtrace_path_local:
             if host_check:
@@ -370,22 +372,20 @@ class HDBCONS:
                 os._exit(1)
             else:
                 print("WARNING, local host: ", self.local_host, ", should be part of cdtrace: ", cdtrace_path_local, ". It is not. Continue at your own risk!")
-        for host in self.hosts:
-            #Let us try temp directories without time stamp, only date:
+        for hdbcons_host, hdbcons_port, hdbcons_service in zip(self.hdbcons_hosts, self.hdbcons_ports, self.hdbcons_services):
             if len(self.local_host.split('.')) > 1:
-                replace_host = host
+                replace_host = hdbcons_host
             else:
-                replace_host = host.split('.')[0]
-            self.temp_host_output_dirs.append(cdtrace_path_local.replace(self.local_host, replace_host)+"hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d")+"/")
-        for path in self.temp_host_output_dirs:
+                replace_host = hdbcons_host.split('.')[0]
+            self.hdbcons_temp_output_dirs.append(cdtrace_path_local.replace(self.local_host, replace_host)+"_"+hdbcons_port+"_"+hdbcons_service+"_hanasitter_temp_out_"+datetime.now().strftime("%Y-%m-%d")+"/")
+        for path in self.hdbcons_temp_output_dirs:
             if not os.path.exists(path):
                 dummyout = run_command("mkdir "+path)
             dummyout = run_command("chmod 777 "+path)
     def clear(self):
-        for path in self.temp_host_output_dirs:
+        for path in self.hdbcons_temp_output_dirs:
             if os.path.isdir(path):
                 dummout = run_command("rm -r "+path)
-
         
 class CommunicationManager:
     def __init__(self, dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features):
@@ -537,7 +537,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -909,40 +909,39 @@ def record_gstack(gstacks_interval, comman):
 def record_kprof(kprofiler, hdbcons, comman):   # SAP Note 1804811
     out_dir = comman.out_dir+"/"
     total_printout = ""
-    for hdbcon_string, host, tmp_dir in zip(hdbcons.hdbcons_strings, hdbcons.hosts, hdbcons.temp_host_output_dirs): 
-        if host in hdbcons.hostsForRecording:
+    for hdbcons_string, hdbcons_host, hdbcons_service, hdbcons_port, hdbcons_tmp_dir in zip(hdbcons.hdbcons_strings, hdbcons.hdbcons_hosts, hdbcons.hdbcons_services, hdbcons.hdbcons_ports, hdbcons.hdbcons_temp_output_dirs): 
+        if hdbcons_host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
-            filename_cpu = ("kernel_profiler_cpu_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
-            filename_wait = ("kernel_profiler_wait_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
-            filename_kprof_log = ("kernel_profiler_output_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".log")
+            filename_cpu = ("kernel_profiler_cpu_"+hdbcons_host+"_"+hdbcons.SID+"_"+hdbcons_service+"_"+hdbcons_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
+            filename_wait = ("kernel_profiler_wait_"+hdbcons_host+"_"+hdbcons.SID+"_"+hdbcons_service+"_"+hdbcons_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".dot")
+            filename_kprof_log = ("kernel_profiler_output_"+hdbcons_host+"_"+hdbcons.SID+"_"+hdbcons_service+"_"+hdbcons_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".log")
             start_time = datetime.now()
-            os.system(hdbcon_string+'profiler clear" > '+out_dir+filename_kprof_log)
-            os.system(hdbcon_string+'profiler start -w '+str(kprofiler.kprofs_wait)+'" > '+out_dir+filename_kprof_log)
+            os.system(hdbcons_string+'profiler clear" > '+out_dir+filename_kprof_log)
+            os.system(hdbcons_string+'profiler start -w '+str(kprofiler.kprofs_wait)+'" > '+out_dir+filename_kprof_log)
             time.sleep(kprofiler.kprofs_duration) 
-            os.system(hdbcon_string+'profiler stop" > '+out_dir+filename_kprof_log)    
-            os.system(hdbcon_string+'profiler print -o '+tmp_dir+filename_cpu+','+tmp_dir+filename_wait+'" > '+out_dir+filename_kprof_log)
-            os.system(hdbcon_string+'profiler clear" > '+out_dir+filename_kprof_log) # added to avoid an entry in M_KERNEL_PROFILER 
+            os.system(hdbcons_string+'profiler stop" > '+out_dir+filename_kprof_log)    
+            os.system(hdbcons_string+'profiler print -o '+hdbcons_tmp_dir+filename_cpu+','+hdbcons_tmp_dir+filename_wait+'" > '+out_dir+filename_kprof_log)
+            os.system(hdbcons_string+'profiler clear" > '+out_dir+filename_kprof_log) # added to avoid an entry in M_KERNEL_PROFILER 
             stop_time = datetime.now()
             if "[ERROR]" in open(out_dir+filename_kprof_log).read():
                 printout = "Kernel Profiler   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , False        ,   None     , "+out_dir+filename_kprof_log
             else:
-                os.system("mv "+tmp_dir+filename_cpu+" "+out_dir+filename_cpu)
-                os.system("mv "+tmp_dir+filename_wait+" "+out_dir+filename_wait)
+                os.system("mv "+hdbcons_tmp_dir+filename_cpu+" "+out_dir+filename_cpu)
+                os.system("mv "+hdbcons_tmp_dir+filename_wait+" "+out_dir+filename_wait)
                 printout = "Kernel Profiler   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+out_dir+filename_cpu+" and "+out_dir+filename_wait
             log(printout, comman)
             total_printout += printout
     time.sleep(kprofiler.kprofs_interval)
     return total_printout  
- 
- 
+
 def record_callstack(callstacks_interval, hdbcons, comman):
     total_printout = ""
-    for hdbcon_string, host in zip(hdbcons.hdbcons_strings, hdbcons.hosts):
-        if host in hdbcons.hostsForRecording:
+    for hdbcons_string, hdbcons_host, hdbcons_service, hdbcons_port in zip(hdbcons.hdbcons_strings, hdbcons.hdbcons_hosts, hdbcons.hdbcons_services, hdbcons.hdbcons_ports):
+        if hdbcons_host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
-            filename = (comman.out_dir+"/callstack_"+host+"_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
+            filename = (comman.out_dir+"/callstack_"+hdbcons_host+"_"+hdbcons.SID+"_"+hdbcons_service+"_"+hdbcons_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
             start_time = datetime.now()
-            os.system(hdbcon_string+'context list -s" > '+filename)
+            os.system(hdbcons_string+'context list -s" > '+filename)
             stop_time = datetime.now()
             printout = "Call Stack Record , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          ,   -        , "+filename 
             log(printout, comman)
@@ -952,26 +951,22 @@ def record_callstack(callstacks_interval, hdbcons, comman):
  
 def record_rtedump(rtedumps_interval, hdbcons, comman):
     total_printout = ""
-    for hdbcon_string, host in zip(hdbcons.hdbcons_strings, hdbcons.hosts):
-        if host in hdbcons.hostsForRecording:
+    for hdbcons_string, hdbcons_host, hdbcons_service, hdbcons_port in zip(hdbcons.hdbcons_strings, hdbcons.hdbcons_hosts, hdbcons.hdbcons_services, hdbcons.hdbcons_ports):
+        if hdbcons_host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
-            if hdbcons.hdbservice == 'hdbnameserver':
-                service_port = hdbcons.communicationPort
-            else:
-                service_port = hdbcons.hdbservice
             start_time = datetime.now()
             if hdbcons.rte_mode == 0: # normal rte dump
-                filename = (comman.out_dir+"/rtedump_normal_"+host+"_"+hdbcons.SID+"_"+service_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
-                os.system(hdbcon_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
+                filename = (comman.out_dir+"/rte_norm_"+hdbcons_host+"_"+hdbcons.SID+"_"+hdbcons_service+"_"+hdbcons_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                os.system(hdbcons_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
             elif hdbcons.rte_mode == 1: # light rte dump 
-                filename = (comman.out_dir+"/rtedump_light_"+host+"_"+hdbcons.SID+"_"+service_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
-                os.system(hdbcon_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_DEV_JOBEXWAITING" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_DEV_CONTEXTS" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_CONNECTIONS" >> '+filename)
-                os.system(hdbcon_string+'statreg print -h -n M_DEV_SESSION_PARTITIONS" >> '+filename)
+                filename = (comman.out_dir+"/rtedump_light_"+hdbcons_host+"_"+hdbcons.SID+"_"+hdbcons_service+"_"+hdbcons_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
+                os.system(hdbcons_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
+                os.system(hdbcons_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
+                os.system(hdbcons_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
+                os.system(hdbcons_string+'statreg print -h -n M_DEV_JOBEXWAITING" >> '+filename)
+                os.system(hdbcons_string+'statreg print -h -n M_DEV_CONTEXTS" >> '+filename)
+                os.system(hdbcons_string+'statreg print -h -n M_CONNECTIONS" >> '+filename)
+                os.system(hdbcons_string+'statreg print -h -n M_DEV_SESSION_PARTITIONS" >> '+filename)
             stop_time = datetime.now()
             printout = "RTE Dump Record   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         ,   -        , "+filename   # if an [ERROR] happens that will be inside the file, hanasitter will not know it
             log(printout, comman)
@@ -979,7 +974,7 @@ def record_rtedump(rtedumps_interval, hdbcons, comman):
     time.sleep(rtedumps_interval)
     return total_printout 
 
-def record_customsql(customsql, hdbcons, comman):
+def record_customsql(customsql, hdbcons, comman):   # for this record option -sv makes no sense since hdbcons is not used
     tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
     filename = comman.out_dir+"/custom_sql_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt"
     customsql_output_file = open(filename, "a")
@@ -994,7 +989,7 @@ def record_customsql(customsql, hdbcons, comman):
     time.sleep(customsql.custom_sql_interval)
     return printout 
 
-def record_customquer(custom_query, custom_query_wait, comman):
+def record_customquer(custom_query, custom_query_wait, comman):  # for this record option -sv makes no sense since hdbcons is not used
     start_time = datetime.now()
     customquer_output = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "'+custom_query+'"')
     stop_time = datetime.now()
@@ -1207,6 +1202,21 @@ def log(message, comman, file_name = "", sendEmail = False):
             mailstring += ' -S from="'+emailNotification.senderEmail+'" '
         mailstring += ",".join(emailNotification.receiverEmails)
         output = run_command(mailstring)
+
+def getServiceHostPort(hdbconsservice, hdbconshost, tenantDBName, local_dbinstance, shell):
+    # Must find port (communication port, not the SQL port) of service, to be used for hdbcons
+    # Cannot use SQL to find the port (like in first suggestion of SAP Note 2410143) since HANA could be down --> find port based on trace files
+    cdtrace_pathes = []
+    cdtrace_pathes.append(cdalias('cdtrace', local_dbinstance, shell))
+    if tenantDBName:
+        cdtrace_pathes.append(cdtrace_pathes[0]+"/DB_"+tenantDBName)
+    for tracepath in cdtrace_pathes:
+        tracefile = run_command("ls "+tracepath+"/"+hdbconsservice+"_"+hdbconshost+".* | head -n 1 ")
+        if tracefile:
+            portnumber = tracefile.split(hdbconsservice+"_"+hdbconshost+".")[1].split(".")[0]
+            if not portnumber == '00000': # sometimes nameserver can have strange trace files
+                return portnumber
+    return '-1'  # then did not succeed to find portnumber
     
 def main():
     #####################  CHECK PYTHON VERSION ###########
@@ -1244,10 +1254,11 @@ def main():
     kill_session = [] # default: do not kill any session
     intervals_of_features = [] #default only one check per feature
     after_recorded = -1 #default: exits after recorded
-    hdbservice = 'hdbnameserver'
+    hdbconsservices = []
+    hdbconsservices_print = "false"
     std_out = "true" #print to std out
-    out_dir = "/tmp/hanasitter_output"
-    log_dir = "/tmp/hanasitter_output"
+    out_dir = "/tmp/hanasitter_out"
+    log_dir = "/tmp/hanasitter_out"
     minRetainedOutputDays = -1 #automatic cleanup of hanasitter output files
     minRetainedLogDays = -1 #automatic cleanup of hanasitterlog
     out_config = "false"
@@ -1345,7 +1356,8 @@ def main():
                     intervals_of_features               = getParameterListFromFile(firstWord, '-if', flagValue, flag_file, flag_log, intervals_of_features)
                     feature_check_timeout               = getParameterFromFile(firstWord, '-tf', flagValue, flag_file, flag_log, feature_check_timeout)
                     after_recorded                      = getParameterFromFile(firstWord, '-ar', flagValue, flag_file, flag_log, after_recorded)
-                    hdbservice                          = getParameterFromFile(firstWord, '-sv', flagValue, flag_file, flag_log, hdbservice)
+                    hdbconsservices                     = getParameterListFromFile(firstWord, '-sv', flagValue, flag_file, flag_log, hdbconsservices)
+                    hdbconsservices_print               = getParameterFromFile(firstWord, '-svp', flagValue, flag_file, flag_log, hdbconsservices_print)
                     out_dir                             = getParameterFromFile(firstWord, '-od', flagValue, flag_file, flag_log, out_dir)
                     minRetainedOutputDays               = getParameterFromFile(firstWord, '-odr', flagValue, flag_file, flag_log, minRetainedOutputDays)
                     log_dir                             = getParameterFromFile(firstWord, '-ol', flagValue, flag_file, flag_log, log_dir)
@@ -1415,7 +1427,8 @@ def main():
     intervals_of_features               = getParameterListFromCommandLine(sys.argv, '-if', flag_log, intervals_of_features)
     feature_check_timeout               = getParameterFromCommandLine(sys.argv, '-tf', flag_log, feature_check_timeout)
     after_recorded                      = getParameterFromCommandLine(sys.argv, '-ar', flag_log, after_recorded)
-    hdbservice                          = getParameterFromCommandLine(sys.argv, '-sv', flag_log, hdbservice)
+    hdbconsservices                     = getParameterListFromCommandLine(sys.argv, '-sv', flag_log, hdbconsservices)
+    hdbconsservices_print               = getParameterFromCommandLine(sys.argv, '-svp', flag_log, hdbconsservices_print)
     out_dir                             = getParameterFromCommandLine(sys.argv, '-od', flag_log, out_dir)
     minRetainedOutputDays               = getParameterFromCommandLine(sys.argv, '-odr', flag_log, minRetainedOutputDays)
     log_dir                             = getParameterFromCommandLine(sys.argv, '-ol', flag_log, log_dir)
@@ -1765,15 +1778,22 @@ def main():
         log("INPUT ERROR: -ar must be an integer. Please see --help for more information.", comman)
         os._exit(1)
     after_recorded = int(after_recorded)
-    ### hdbservice, -sv  (default = hdbnameserver --> hdbcons opens in nameserver, i.e. SDB, and dumps based on the port, 
-    #                     that could be an indexserver or the nameserver, i.e. -d, see SAP Note 2222218, is not used)
-    if not hdbservice in ['hdbnameserver', 'hdbcompileserver', 'hdbpreprocessor', 'hdbdocstore', 'hdbdpserver', 'hdbscriptserver', 'hdbxsengine', 'hdbdiserver', 'hdbwebdispatcher']:
-        log("INPUT ERROR: -sv is not one of the valid values. Please see --help for more information.", comman)
+    ### hdbconsservices, -sv 
+    if hdbconsservices:
+        if not all(service in ['nameserver', 'indexserver', 'compileserver', 'preprocessor', 'docstore', 'dpserver', 'scriptserver', 'xsengine', 'diserver', 'webdispatcher'] for service in hdbconsservices):
+            log("INPUT ERROR: One of the elements of -sv is not one of the valid values. Please see --help for more information.", comman)
+            os._exit(1)
+        if num_custom_sql_recordings:
+            log("INPUT ERROR: Both -sv and -ns are specified, this makes no sense. Please see --help for more information.", comman)
+            os._exit(1)
+        if custom_queries:
+            log("INPUT ERROR: Both -sv and -cq are specified, this makes no sense. Please see --help for more information.", comman)
+            os._exit(1)
+    ### hdbconsservices_print, -svp
+    hdbconsservices_print = checkAndConvertBooleanFlag(hdbconsservices_print, "-svp")
+    if hdbconsservices_print and not hdbconsservices:
+        log("INPUT ERROR: -svp is true allthough -sv is not specified, this makes no sense. Please see --help for more information.", comman)
         os._exit(1)
-    if not hdbservice == 'hdbnameserver':
-        if (len(used_hosts) > 1):
-            log("INPUT ERROR: -sv different from default is not supported for scale-out. Please see --help for more information.", comman)
-            os._exit(1)  
     ### minRetainedOutputDays, -odr
     if not is_integer(minRetainedOutputDays):
         log("INPUT ERROR: -odr must be an integer. Please see --help for more information.", comman)
@@ -1898,8 +1918,22 @@ def main():
         global emailNotification
         emailNotification = EmailNotification(receiver_emails, email_client, senders_email, mail_server, SID)
 
+    ### CREATE HDBCONS MANGER ###
+    hdbcons = HdbconsManager(local_host, used_hosts, local_dbinstance, is_tenant, communicationPort, SID, rte_mode, tenantDBName, shell)
     ### FILL HDBCONS STRINGS ###
-    hdbcons = HDBCONS(local_host, used_hosts, local_dbinstance, is_tenant, communicationPort, SID, rte_mode, hdbservice, tenantDBName, shell)
+    if hdbconsservices:  # Then -sv is set with requested services
+        for hdbconsservice in hdbconsservices:
+            for hdbconshost in used_hosts:
+                hdbconsport = getServiceHostPort(hdbconsservice, hdbconshost, tenantDBName, local_dbinstance, shell)
+                if not hdbconsport == '-1':
+                    hdbcons.create_hdbcons_string(hdbconshost, hdbconsport, hdbconsservice)
+        if hdbconsservices_print:
+            hdbcons.print_service_host_ports()
+    else:  # then -sv is not set --> hdbcons opens in nameserver, i.e. SDB, and dumps based on the SQL port specified in the key, 
+           # that could be an indexserver or the nameserver, i.e. -d, see SAP Note 2222218, is not used   
+        for hdbconshost in used_hosts:
+            hdbconsservice = "indexserver" if is_tenant else "nameserver"
+            hdbcons.create_hdbcons_string(hdbconshost, communicationPort, hdbconsservice)
 
     ################ START #################
     if is_tenant:
