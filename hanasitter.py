@@ -69,6 +69,7 @@ def printHelp():
     print(" -scn    only negative changes [false/true], if true will only show engine changes that made performance worse, default: false                      ")
     print(" -scx    number characters of the sql text printed together with the outputs defined by -scp, default: 0                                            ")
     print(" -lf     log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
+    print("         Note: For safety reasons, -lf is not available anymore, unless you enable it yourself in the python code.                                  ")
     print(" -ci     check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
     print(" -ar     time to sleep after recording [seconds], if negative it exits, default: -1                                                                 ")
     print("         *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps and/or Output from Custom SQL) ***               ")
@@ -1563,7 +1564,8 @@ def main():
     ### log_features, -lf
     log_features = checkAndConvertBooleanFlag(log_features, "-lf")
     if log_features:
-        log("WARNING: -lf is turned on. Are you sure?")
+        log("SAFETY ERROR: -lf is not supported anymore. If you really need it you must enable it yourself (by e.g. removing next line). Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        os._exit(1) 
     if log_features and len(critical_features) == 0:
         log("INPUT ERROR: -lf is True even though -cf is empty, i.e. no critical feature specified. This does not make sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
         os._exit(1) 
