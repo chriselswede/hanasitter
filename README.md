@@ -6,15 +6,14 @@ The HANA sitter checks regularly (def. 1h) if HANA is online and primary. If so,
 
 ### DISCLAIMER  
 ANY USAGE OF HANASITTER ASSUMES THAT YOU HAVE UNDERSTOOD AND AGREED THAT:  
-1. HANASitter is NOT SAP official software, so normal SAP support of HANASitter cannot be assumed   
+1. HANASitter is NOT SAP official software! NO support of HANASitter cannot be assumed!   
 2. HANASitter is open source   
 3. HANASitter is provided "as is"  
 4. HANASitter is to be used on "your own risk"  
 5. HANASitter is a one-man's hobby (developed, maintained and supported only during non-working hours)  
 6. HANASitter expects "default" HANA environment with no modifications done in the .bashrc or other files 
 
-7. All HANASitter documentations have to be read and understood before any usage:    
-    * SAP Note [2399979](https://launchpad.support.sap.com/#/notes/2399979)   
+7. All HANASitter documentations have to be read and understood before any usage:      
     * The .pdf file hanasitter.pdf    
     * All output from executing     `python hanasitter.py --help`    
     
