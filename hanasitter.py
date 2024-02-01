@@ -1181,6 +1181,7 @@ def cdalias(alias, local_dbinstance, shell):   # alias e.g. cdtrace, cdhdb, ...
         path = path + '/' + piece + '/'
     path = path.replace("[0-9][0-9]", local_dbinstance) # if /bin/bash shows strange HDB[0-9][0-9] we force correct instance on it
     path = path.replace("executing .customer.sh.....\n", '')  #removing strange stuff 
+    path = path.replace("DISPLAY set to localhost:10.0\n", '')  #removing strange stuff
     return path    
         
 def log(message, comman, file_name = "", sendEmail = False):
