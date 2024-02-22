@@ -360,8 +360,13 @@ class HdbconsManager:
     def create_hdbcons_string(self, host, port, service):
         self.hdbcons_hosts.append(host)
         self.hdbcons_ports.append(port)
-        self.hdbcons_services.append(service)
-        self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+port+' ')  # SAP Notes 2222218 and 2410143
+        self.hdbcons_services.append(service)                  # SAP Notes 2222218 and 2410143
+        self.hdbcons_strings.append('hdbcons -e hdbnameserver "distribute exec '+host+':'+port+' ')  # we need this in case of scale-out, to reach other hosts, but for scale_up, see below 
+    def create_hdbcons_string_scale_up(self, host, port, service):
+        self.hdbcons_hosts.append(host)
+        self.hdbcons_ports.append(port)
+        self.hdbcons_services.append(service)                  # SAP Note 2222218
+        self.hdbcons_strings.append('hdbcons "')  #hdbcons developers: "in case of a problem it is more likely to get useful results by connecting directly"
     def print_service_host_ports(self):
         print("Services to record from:")
         print("Host:                         Service:                      Port:                         Host:Port")
@@ -1931,14 +1936,20 @@ def main():
             for hdbconshost in used_hosts:
                 hdbconsport = getServiceHostPort(hdbconsservice, hdbconshost, tenantDBName, local_dbinstance, shell)
                 if not hdbconsport == '-1':
-                    hdbcons.create_hdbcons_string(hdbconshost, hdbconsport, hdbconsservice)
+                    if len(hosts_worker_and_standby) > 1:
+                        hdbcons.create_hdbcons_string(hdbconshost, hdbconsport, hdbconsservice)
+                    else:
+                        hdbcons.create_hdbcons_string_scale_up(hdbconshost, hdbconsport, hdbconsservice)
         if hdbconsservices_print:
             hdbcons.print_service_host_ports()
     else:  # then -sv is not set --> hdbcons opens in nameserver, i.e. SDB, and dumps based on the SQL port specified in the key, 
            # that could be an indexserver or the nameserver, i.e. -d, see SAP Note 2222218, is not used   
         for hdbconshost in used_hosts:
             hdbconsservice = "indexserver" if is_tenant else "nameserver"
-            hdbcons.create_hdbcons_string(hdbconshost, communicationPort, hdbconsservice)
+            if len(hosts_worker_and_standby) > 1:
+                hdbcons.create_hdbcons_string(hdbconshost, communicationPort, hdbconsservice)
+            else:
+                hdbcons.create_hdbcons_string_scale_up(hdbconshost, communicationPort, hdbconsservice)
 
     ################ START #################
     if is_tenant:
