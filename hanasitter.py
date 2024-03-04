@@ -307,7 +307,7 @@ class EmailNotification:
             print("Mail Server: ", self.mailServer)
         else:
             print("Configured mail server will be used.")
-        print("Reciever Emails: ", self.receiverEmails)
+        print("Receiver Emails: ", self.receiverEmails)
 
 #### Remember:
 #Nameserver port is always 3**01 and SQL port = 3**13 valid for,
