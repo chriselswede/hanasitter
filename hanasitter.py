@@ -366,7 +366,10 @@ class HdbconsManager:
         self.hdbcons_hosts.append(host)
         self.hdbcons_ports.append(port)
         self.hdbcons_services.append(service)                  # SAP Note 2222218
-        self.hdbcons_strings.append('hdbcons "')  #hdbcons developers: "in case of a problem it is more likely to get useful results by connecting directly"
+        if self.tenantDBName:
+            self.hdbcons_strings.append('hdbcons -e hdb'+service+' -d '+self.tenantDBName+' "')
+        else:
+            self.hdbcons_strings.append('hdbcons "')  #hdbcons developers: "in case of a problem it is more likely to get useful results by connecting directly"
     def print_service_host_ports(self):
         print("Services to record from:")
         print("Host:                         Service:                      Port:                         Host:Port")
