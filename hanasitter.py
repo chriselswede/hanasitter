@@ -148,13 +148,16 @@ def printHelp():
     print('         NOTE: For this to work you have to install the linux program "sendmail" and add a line similar to DSsmtp.intra.ourcompany.com in the file  ')
     print("               sendmail.cf in /etc/mail/, see https://www.systutorials.com/5167/sending-email-using-mailx-in-linux-through-internal-smtp/           ")
     print(" -so     standard out switch [true/false], switch to write to standard out, default:  true                                                          ")
+    print(" -or     output run commands [true/false], prints out most run commands, default: false                                                             ")
     print(" -ff     flag file(s), a comma seperated list of full paths to a files that contain input flags, each flag in a new line, all lines in the file     ")
     print("         that do not start with a flag (a minus) are considered comments, default: '' (not used)                                                    ")
     print(" -ssl    turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, default: false                                ") 
     print(" -vlh    virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")
     print(" -hc     host checking [true/false], checks if the host is the same as in cdtrace and provided in hdbuserkey, might be necessary to turn to false   ")
     print("         e.g. if you for some reason must provide full host name in hdbuserkey (it will still give warnings though), default: true                  ")
-    print(" -sh     shell, default: /bin/bash                                                                                                                  ")                
+    print(" -sh     shell, default: /bin/bash                                                                                                                  ")   
+    print(" -hev    hdbsql environment variable, for any environment variable that should be added to the hdbsql command, do not include the $ sign, it will   ")
+    print("         added automatically, e.g. -hev SSL_OPTIONS, default: ''                                                                                    ")             
     print(" -k      DB user key, this one has to be maintained in hdbuserstore, i.e. as <sid>adm do                                                            ")               
     print("         > hdbuserstore SET <DB USER KEY> <ENV> <USERNAME> <PASSWORD>                     , default: SYSTEMKEY                                      ")
     print("                                                                                                                                                    ")    
@@ -399,13 +402,14 @@ class HdbconsManager:
                 dummout = run_command("rm -r "+path)
         
 class CommunicationManager:
-    def __init__(self, dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features):
+    def __init__(self, dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features, out_run_command):
         self.dbuserkey = dbuserkey
         self.out_dir = out_dir
         self.log_dir = log_dir
         self.std_out = std_out
         self.hdbsql_string = hdbsql_string
-        self.log_features = log_features     
+        self.log_features = log_features
+        self.out_run_command = out_run_command
         
 class CriticalFeature:
     def __init__(self, view, feature, value, limit, killSession = '0'):
@@ -514,11 +518,15 @@ class SCCManager:
 
 ######################## DEFINE FUNCTIONS ################################
 
-def run_command(cmd):
-    if sys.version_info[0] == 2: 
+def run_command(cmd, out_run_command = False):
+    if sys.version_info[0] == 2:
+        if out_run_command:
+            print("Will execute  subprocess.check_output(cmd, shell=True)  where cmd = \n", cmd)   
         out = subprocess.check_output(cmd, shell=True).strip("\n")
     elif sys.version_info[0] == 3:
-        out = subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip("\n")
+        if out_run_command:
+            print("Will execute  subprocess.run(cmd, shell=True, capture_output=True, text=True)  where cmd = \n", cmd)  
+        out = subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip("\n") 
     else:
         print("ERROR: Wrong Python version")
         os._exit(1)
@@ -548,7 +556,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-ssl", "-vlh", "-hc", "-sh", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-vlh", "-hc", "-sh", "-hev", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -600,7 +608,7 @@ def is_multitenant_database_container(local_dbinstance, shell):
 def ping_db(comman, output):
     with open(os.devnull, 'w') as devnull:  # just to get no stdout in case HANA is offline
         try:
-            output[0] = run_command(comman.hdbsql_string+''' -j -A -U '''+comman.dbuserkey+''' "select * from dummy"''') #this might be a problem ... from https://docs.python.org/3/library/subprocess.html#subprocess.getoutput : 
+            output[0] = run_command(comman.hdbsql_string+''' -j -A -U '''+comman.dbuserkey+''' "select * from dummy"''', comman.out_run_command) #this might be a problem ... from https://docs.python.org/3/library/subprocess.html#subprocess.getoutput : 
             #The stdout and stderr arguments may not be supplied at the same time as capture_output. If you wish to capture and combine both streams into one, use stdout=PIPE and stderr=STDOUT instead of capture_output.
         except:
             pass
@@ -657,14 +665,14 @@ def file_lines_with_word(file_name, word):
 def clean_outputs(minRetainedOutputDays, comman):
     path = comman.out_dir
     nFilesBefore = len([name for name in os.listdir(path)])
-    dummyout = run_command("find "+path+"/* -mtime +"+str(minRetainedOutputDays)+" -delete")
+    dummyout = run_command("find "+path+"/* -mtime +"+str(minRetainedOutputDays)+" -delete", comman.out_run_command)
     nFilesAfter = len([name for name in os.listdir(path)])
     return nFilesBefore - nFilesAfter 
 
 def clean_logs(minRetainedLogDays, comman):
     path = comman.log_dir
     nFilesBefore = len([name for name in os.listdir(path) if "hanasitterlog" in name])
-    dummyout = run_command("find "+path+"/hanasitterlog* -mtime +"+str(minRetainedLogDays)+" -delete")
+    dummyout = run_command("find "+path+"/hanasitterlog* -mtime +"+str(minRetainedLogDays)+" -delete", comman.out_run_command)
     nFilesAfter = len([name for name in os.listdir(path) if "hanasitterlog" in name])
     return nFilesBefore - nFilesAfter  
 
@@ -745,7 +753,7 @@ def cpu_too_high(cpu_check_params, comman):
     for cpu_type in [1,2]:
         if cpu_type == input_cpu_type or input_cpu_type == 3:
             start_time = datetime.now()
-            command_run = run_command("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2])
+            command_run = run_command("sar -u "+cpu_check_params[1]+" "+cpu_check_params[2], comman.out_run_command)
             sar_words = command_run.split()
             cpu_column = 2 if cpu_type == 1 else 4 
             current_cpu = sar_words[sar_words.index('Average:') + cpu_column]
@@ -764,19 +772,19 @@ def cpu_too_high(cpu_check_params, comman):
 
 def stop_session(cf, comman):
     how_to_kill = 'CANCEL' if cf.killSession == 'C' else 'DISCONNECT'    
-    connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where VIEW_COLUMN_NAME = 'CONNECTION_ID' and VIEW_NAME = '"+cf.view+"'\"").strip(' '))
+    connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where VIEW_COLUMN_NAME = 'CONNECTION_ID' and VIEW_NAME = '"+cf.view+"'\"", comman.out_run_command).strip(' '))
     if connExists:
-        connIds = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+'"').splitlines(1)
+        connIds = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select distinct CONNECTION_ID from SYS.'+cf.view+' where '+cf.whereClause+'"', comman.out_run_command).splitlines(1)
         connIds = [c.strip('\n').strip('|').strip(' ') for c in connIds]
         for connId in connIds:
-            connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"").strip(' '))
+            connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"", comman.out_run_command).strip(' '))
             if not connExists:
                 log("Connection "+connId+" was already disconnected before HANASitter got to it", comman)
             else:
                 log("Will "+how_to_kill+" session "+connId+" due to the check: "+cf.whereClauseDescription, comman)
                 try:
-                    dummyout = run_command(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM """+how_to_kill+""" SESSION '"""+connId+"""'" """)
-                    connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"").strip(' '))
+                    dummyout = run_command(comman.hdbsql_string+""" -j -A -U """+comman.dbuserkey+""" "ALTER SYSTEM """+how_to_kill+""" SESSION '"""+connId+"""'" """, comman.out_run_command)
+                    connExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \" select count(*) from sys.m_connections where CONNECTION_ID = '"+connId+"'\"", comman.out_run_command).strip(' '))
                     if connExists:
                         log("WARNING, statement \n    ALTER SYSTEM "+how_to_kill+" SESSION '"+connId+"'\nwas executed but the connection "+connId+" is still there. It might take some time until it actually disconnects.", comman)
                     else:
@@ -790,17 +798,17 @@ def stop_session(cf, comman):
 
 def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman):   # cf = critical_feature, # comman = communication manager
     #CHECKS
-    viewExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitors where view_name = '"+cf.view+"'\"").strip(' '))
+    viewExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitors where view_name = '"+cf.view+"'\"", comman.out_run_command).strip(' '))
     if not viewExists:
         log("INPUT ERROR, the view given as first entry in the -cf flag, "+cf.view+", does not exist. Please see --help for more information.", comman)
         os._exit(1)
     if not cf.whereMode:
-        columnExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = '"+cf.feature+"'\"").strip(' ')) 
+        columnExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = '"+cf.feature+"'\"", comman.out_run_command).strip(' ')) 
         if not columnExists:
             log("INPUT ERROR, the view "+cf.view+" does not have the column "+cf.feature+". Please see --help for more information.", comman)
             os._exit(1)
     if host_mode:
-        hostColumnExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = 'HOST'\"").strip(' ')) 
+        hostColumnExists = int(run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select count(*) from sys.m_monitor_columns where view_name = '"+cf.view+"' and view_column_name = 'HOST'\"", comman.out_run_command).strip(' ')) 
         if not hostColumnExists:
             log("INPUT ERROR, you have specified host mode with -hf, but the view "+cf.view+" does not have a HOST column. Please see --help for more information.", comman)
             os._exit(1)         
@@ -809,15 +817,15 @@ def feature_check(cf, nbrCFsPerHost, critical_feature_info, host_mode, comman): 
         # EXECUTE
         nCFsPerHost = []
         if host_mode:
-            hostsInView = run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select distinct HOST from SYS."+cf.view+"\"").strip(' ').split('\n')
+            hostsInView = run_command(comman.hdbsql_string+" -j -A -a -x -Q -U "+comman.dbuserkey+" \"select distinct HOST from SYS."+cf.view+"\"", comman.out_run_command).strip(' ').split('\n')
             hostsInView = [h for h in hostsInView if h != ''] 
             for host in hostsInView:
-                nCFsPerHost.append([int(run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+' and HOST = \''+host+'\'"').split('|')[5].replace(" ", "")), host])
+                nCFsPerHost.append([int(run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+' and HOST = \''+host+'\'"', comman.out_run_command).split('|')[5].replace(" ", "")), host])
         else:                
-            nCFsPerHost.append([int(run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+'"').split('|')[5].replace(" ", "")), ''])
+            nCFsPerHost.append([int(run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select count(*) from SYS.'+cf.view+' where '+cf.whereClause+'"', comman.out_run_command).split('|')[5].replace(" ", "")), ''])
         # COLLECT INFO
         if comman.log_features:  #already prevented that log features (-lf) and host mode (-hm) is not used together
-            critical_feature_info[0] = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select * from SYS.'+cf.view+' where '+cf.whereClause+'"')
+            critical_feature_info[0] = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "select * from SYS.'+cf.view+' where '+cf.whereClause+'"', comman.out_run_command)
         for cfHost in nCFsPerHost:
             if cfHost[1] in nbrCFSum:
                 nbrCFSum[cfHost[1]] += cfHost[0]
@@ -846,7 +854,7 @@ def sqlCacheCheck(sccmanager, comman):
         hashes_with_engine_change = [hash.strip('\n').strip('|').strip(' ') for hash in hashes_with_engine_change]
         hashes_with_engine_change = "', '".join(hashes_with_engine_change)
         select_string = "select MAX(RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20)) MAX_SNP_TIME, STATEMENT_HASH HASH,  LPAD(TO_DECIMAL(SUM(TOTAL_EXECUTION_TIME)/SUM(EXECUTION_COUNT)/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(SUM(EXECUTION_COUNT), 11) EXEC_COUNT, "+change_type+", LPAD(TO_DECIMAL(SUM(TOTAL_EXECUTION_TIME)/1000/1000/60, 10, 0), 11) TOT_EXEC_MINUTES from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH in ('"+hashes_with_engine_change+"') group by STATEMENT_HASH, "+change_type+" order by STATEMENT_HASH"
-        output_table = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"').splitlines(1)
+        output_table = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"', comman.out_run_command).splitlines(1)
         HashCaches = {}
         for table_row in output_table:
             table_row = table_row.strip('\n').strip('|').split('|')
@@ -879,12 +887,12 @@ def sqlCacheCheck(sccmanager, comman):
                 for h,hc in HashCaches.items():
                     for max_snp_time in hc.max_snp_time:
                         select_string = "select RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20) SNP_TIME, STATEMENT_HASH HASH, LPAD(TO_DECIMAL(TOTAL_EXECUTION_TIME/EXECUTION_COUNT/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(EXECUTION_COUNT, 11) EXEC_COUNT, "+change_type+" from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH = '"+h+"' and SERVER_TIMESTAMP > ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), -"+str(sccmanager.h_print_engine_changes)+"*3600) and SERVER_TIMESTAMP < ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), "+str(sccmanager.h_print_engine_changes)+"*3600)"
-                        output_table = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"').splitlines(1)
+                        output_table = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"', comman.out_run_command).splitlines(1)
                         header_list = ["Max snapshot time", "Hash", "Avg Exec Time [ms]", "Execution Count", change_title]
                         sql_text = ''
                         if sccmanager.sql_text_len > 0:
                             select_string = "select top 1 LPAD(STATEMENT_STRING, "+str(sccmanager.sql_text_len)+") SQL_TEXT from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH = '"+h+"'"
-                            sql_text = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"').strip(' ').strip('|').strip(' ')
+                            sql_text = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"', comman.out_run_command).strip(' ').strip('|').strip(' ')
                         if sql_text: 
                             header_list.append("SQL Text")
                         values_lists = []
@@ -907,7 +915,7 @@ def sqlCacheCheck(sccmanager, comman):
     return 0
  
 def record_gstack(gstacks_interval, comman):
-    pid = run_command("pgrep hdbindexserver").strip("\n").strip(" ")
+    pid = run_command("pgrep hdbindexserver", comman.out_run_command).strip("\n").strip(" ")
     start_time = datetime.now()
     filename = (comman.out_dir+"/gstack_"+pid+"_"+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt")
     os.system('gstack '+pid+' > '+filename)
@@ -990,7 +998,7 @@ def record_customsql(customsql, hdbcons, comman):   # for this record option -sv
     filename = comman.out_dir+"/custom_sql_"+hdbcons.SID+"_"+hdbcons.communicationPort+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".txt"
     customsql_output_file = open(filename, "a")
     start_time = datetime.now()
-    customsql_output = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "'+customsql.custom_sql_recording+'"')
+    customsql_output = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "'+customsql.custom_sql_recording+'"', comman.out_run_command)
     customsql_output_file.write(customsql_output)   
     customsql_output_file.flush()
     customsql_output_file.close()
@@ -1002,7 +1010,7 @@ def record_customsql(customsql, hdbcons, comman):   # for this record option -sv
 
 def record_customquer(custom_query, custom_query_wait, comman):  # for this record option -sv makes no sense since hdbcons is not used
     start_time = datetime.now()
-    customquer_output = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "'+custom_query+'"')
+    customquer_output = run_command(comman.hdbsql_string+' -j -A -U '+comman.dbuserkey+' "'+custom_query+'"', comman.out_run_command)
     stop_time = datetime.now()
     printout = "Custom Query      , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          ,   -        , "+custom_query+"   -->   Will now wait "+str(custom_query_wait)+" seconds"
     log(printout, comman)
@@ -1084,15 +1092,15 @@ def parallel_recording_wrapper(rec_types):
 
 def parallel_recording(record_type, recorder, hdbcons, comman):
     if record_type == 1:
-        return record_rtedump(recorder.rtedumps_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_rtedump(recorder.rtedumps_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features, comman.out_run_command))
     elif record_type == 2:
-        return record_callstack(recorder.callstacks_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_callstack(recorder.callstacks_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features, comman.out_run_command))
     elif record_type == 3:
-        return record_gstack(recorder.gstacks_interval, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_gstack(recorder.gstacks_interval, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features, comman.out_run_command))
     elif record_type == 4:
-        return record_kprof(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_kprof(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features, comman.out_run_command))
     else:
-        return record_customsql(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features))
+        return record_customsql(recorder, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features, comman.out_run_command))
 
 def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, critical_features, feature_check_timeout, cpu_check_params, sccmanager, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons):   
     recorded = False
@@ -1152,7 +1160,7 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                             if wrong_number_critical_features:
                                 hostsWithWrongNbrCFs.append(host)
                     if comman.log_features:
-                        log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features), "criticalFeatures")
+                        log(critical_feature_info[0], CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features, comman.out_run_command), "criticalFeatures")
                     if hanging or len(hostsWithWrongNbrCFs):
                         if host_mode:
                             hdbcons.hostsForRecording = hostsWithWrongNbrCFs
@@ -1213,7 +1221,7 @@ def log(message, comman, file_name = "", sendEmail = False):
         if emailNotification.senderEmail:
             mailstring += ' -S from="'+emailNotification.senderEmail+'" '
         mailstring += ",".join(emailNotification.receiverEmails)
-        output = run_command(mailstring)
+        output = run_command(mailstring, comman.out_run_command)
 
 def getServiceHostPort(hdbconsservice, hdbconshost, tenantDBName, local_dbinstance, shell):
     # Must find port (communication port, not the SQL port) of service, to be used for hdbcons
@@ -1269,6 +1277,7 @@ def main():
     hdbconsservices = []
     hdbconsservices_print = "false"
     std_out = "true" #print to std out
+    out_run_command = "false" #print all run commands
     out_dir = "/tmp/hanasitter_out"
     log_dir = "/tmp/hanasitter_out"
     minRetainedOutputDays = -1 #automatic cleanup of hanasitter output files
@@ -1291,6 +1300,7 @@ def main():
     virtual_local_host = "" #default: assume physical local host
     host_check = "true"
     shell = "/bin/bash"
+    hdbsql_env_variable = ''
     dbuserkey = 'SYSTEMKEY' # This KEY has to be maintained in hdbuserstore  
                             # so that   hdbuserstore LIST    gives e.g. 
                             # KEY SYSTEMKEY
@@ -1388,10 +1398,12 @@ def main():
                     senders_email                       = getParameterFromFile(firstWord, '-ens', flagValue, flag_file, flag_log, senders_email)
                     mail_server                         = getParameterFromFile(firstWord, '-enm', flagValue, flag_file, flag_log, mail_server)
                     std_out                             = getParameterFromFile(firstWord, '-so', flagValue, flag_file, flag_log, std_out)
+                    out_run_command                     = getParameterFromFile(firstWord, '-or', flagValue, flag_file, flag_log, out_run_command)
                     ssl                                 = getParameterFromFile(firstWord, '-ssl', flagValue, flag_file, flag_log, ssl)
                     virtual_local_host                  = getParameterFromFile(firstWord, '-vlh', flagValue, flag_file, flag_log, virtual_local_host)
                     host_check                          = getParameterFromFile(firstWord, '-hc', flagValue, flag_file, flag_log, host_check)
                     shell                               = getParameterFromFile(firstWord, '-sh', flagValue, flag_file, flag_log, shell)
+                    hdbsql_env_variable                 = getParameterFromFile(firstWord, '-hev', flagValue, flag_file, flag_log, hdbsql_env_variable)
                     dbuserkey                           = getParameterFromFile(firstWord, '-k', flagValue, flag_file, flag_log, dbuserkey)
                     cpu_check_params                    = getParameterListFromFile(firstWord, '-cpu', flagValue, flag_file, flag_log, cpu_check_params)
      
@@ -1459,10 +1471,12 @@ def main():
     senders_email                       = getParameterFromCommandLine(sys.argv, '-ens', flag_log, senders_email)
     mail_server                         = getParameterFromCommandLine(sys.argv, '-enm', flag_log, mail_server)
     std_out                             = getParameterFromCommandLine(sys.argv, '-so', flag_log, std_out)
+    out_run_command                     = getParameterFromCommandLine(sys.argv, '-or', flag_log, out_run_command)
     ssl                                 = getParameterFromCommandLine(sys.argv, '-ssl', flag_log, ssl)
     virtual_local_host                  = getParameterFromCommandLine(sys.argv, '-vlh', flag_log, virtual_local_host)
     host_check                          = getParameterFromCommandLine(sys.argv, '-hc', flag_log, host_check)
     shell                               = getParameterFromCommandLine(sys.argv, '-sh', flag_log, shell)
+    hdbsql_env_variable                 = getParameterFromCommandLine(sys.argv, '-hev', flag_log, hdbsql_env_variable)
     dbuserkey                           = getParameterFromCommandLine(sys.argv, '-k', flag_log, dbuserkey)
     cpu_check_params                    = getParameterListFromCommandLine(sys.argv, '-cpu', flag_log, cpu_check_params)  
      
@@ -1527,67 +1541,71 @@ def main():
         startstring = "**************************************************************************************\nHANASitter started "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with\n"+parameter_string+"\nas "+dbuserkey+": "+'\n'.join(key_environment)+"\n\n ANY USAGE OF HANASITTER ASSUMES THAT YOU HAVE READ AND UNDERSTOOD THE DISCLAIMER!\n    python hanasitter.py --disclaimer\n\n**************************************************************************************"
     else:
         startstring = "**************************************************************************************\nHANASitter started "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+" with \n"+" ".join(sys.argv)+"\nas "+dbuserkey+": "+'\n'.join(key_environment)+"\n\n ANY USAGE OF HANASITTER ASSUMES THAT YOU HAVE READ AND UNDERSTOOD THE DISCLAIMER!\n    python hanasitter.py --disclaimer\n\n**************************************************************************************"
-    log(startstring, CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False))    
+    log(startstring, CommunicationManager(dbuserkey, out_dir, log_dir, True, "", False, False))    
     ### std_out, -so
     std_out = checkAndConvertBooleanFlag(std_out, "-so")
+    ### out_run_command, -or
+    out_run_command = checkAndConvertBooleanFlag(out_run_command, "-or")
     ### ssl, -ssl
     ssl = checkAndConvertBooleanFlag(ssl, "-ssl")
     hdbsql_string = "hdbsql "
     if ssl:
         hdbsql_string = "hdbsql -e -ssltrustcert -sslcreatecert "
+    if hdbsql_env_variable:
+        hdbsql_string = hdbsql_string + " $" + hdbsql_env_variable
     ### min_avg_exec_time_diff_pct, -sc
     if not is_integer(min_avg_exec_time_diff_pct):
-        log("INPUT ERROR: -sc must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -sc must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1)
     min_avg_exec_time_diff_pct = int(min_avg_exec_time_diff_pct)
     ### plan_id_changes, -spi
     plan_id_changes = checkAndConvertBooleanFlag(plan_id_changes, "-spi")
     if plan_id_changes and min_avg_exec_time_diff_pct < 0:
-        log("INPUT ERROR: -spi is specified but not -sp. This makes no sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -spi is specified but not -sp. This makes no sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1)
     ### min_exec_counts, -scc
     if not is_integer(min_exec_counts):
-        log("INPUT ERROR: -scc must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -scc must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1)
     min_exec_counts = int(min_exec_counts)
     ### min_tot_exec_time_minutes, -sct
     if not is_integer(min_tot_exec_time_minutes):
-        log("INPUT ERROR: -sct must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -sct must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1)
     min_tot_exec_time_minutes = int(min_tot_exec_time_minutes)
     ### h_print_engine_changes, -scp
     if not is_integer(h_print_engine_changes):
-        log("INPUT ERROR: -scp must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -scp must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1)
     h_print_engine_changes = int(h_print_engine_changes)
     ### only_negative_changes, -scn
     only_negative_changes = checkAndConvertBooleanFlag(only_negative_changes, "-scn")
     ### sql_text_len, -scx
     if not is_integer(sql_text_len):
-        log("INPUT ERROR: -scx must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -scx must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1)
     sql_text_len = int(sql_text_len)
     if sql_text_len and not h_print_engine_changes:
-        log("INPUT ERROR: -scx is more then 0 while -scp is not, this makes no sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -scx is more then 0 while -scp is not, this makes no sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1) 
     ########## SQL Cache Check Manager #################
     sccmanager = SCCManager(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len)
     ### log_features, -lf
     log_features = checkAndConvertBooleanFlag(log_features, "-lf")
     if log_features:
-        log("SAFETY ERROR: -lf is not supported anymore. If you really need it you must enable it yourself (by e.g. removing next line). Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("SAFETY ERROR: -lf is not supported anymore. If you really need it you must enable it yourself (by e.g. removing next line). Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1) 
     if log_features and len(critical_features) == 0:
-        log("INPUT ERROR: -lf is True even though -cf is empty, i.e. no critical feature specified. This does not make sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -lf is True even though -cf is empty, i.e. no critical feature specified. This does not make sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1) 
     ### online_test_interval, -oi  
     if not is_integer(online_test_interval):
-        log("INPUT ERROR: -oi must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False))
+        log("INPUT ERROR: -oi must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1)
     online_test_interval = int(online_test_interval)
         
     ############# COMMUNICATION MANAGER ##############
-    comman = CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features)   
+    comman = CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, log_features, out_run_command)   
 
     ### First Online-Check ###
     wasOnline = True
