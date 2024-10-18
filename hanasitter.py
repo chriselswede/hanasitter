@@ -151,7 +151,13 @@ def printHelp():
     print(" -or     output run commands [true/false], prints out most run commands, default: false                                                             ")
     print(" -ff     flag file(s), a comma seperated list of full paths to a files that contain input flags, each flag in a new line, all lines in the file     ")
     print("         that do not start with a flag (a minus) are considered comments, default: '' (not used)                                                    ")
-    print(" -ssl    turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, default: false                                ") 
+    print(" -ssl    turns on ssl certificate [true/false], makes it possible to use SAP HANA Sitter despite SSL, the following string is added to the hdbsql   ")
+    print("         command:    -e -ssltrustcert -sslcreatecert  , default: false                                                                              ") 
+    print(" -encr   turns on encryption [true/false], adds only  -e   to the hdbsql commend, default: false                                                    ") 
+    print(" -sslk   sslkeystore, to provide the name, with full path, of the ssl key store, default: '' (not used)                                             ")
+    print(" -sslt   ssltruststore, to provide the name, with full path, of the ssl trust store, default: '' (not used)                                         ")
+    print(" -sslp   sslprovider, to provide the name of the ssl provider, default: '' (not used)                                                               ")
+    print(" -ssln   sslhostnameincert, to provide the full name of the ssl certificate for the host,  default: '' (not used)                                   ")
     print(" -vlh    virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")
     print(" -hc     host checking [true/false], checks if the host is the same as in cdtrace and provided in hdbuserkey, might be necessary to turn to false   ")
     print("         e.g. if you for some reason must provide full host name in hdbuserkey (it will still give warnings though), default: true                  ")
@@ -556,7 +562,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-vlh", "-hc", "-sh", "-hev", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-sh", "-hev", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -1297,6 +1303,11 @@ def main():
     senders_email = None
     mail_server = None
     ssl = "false"
+    encryption = "false" 
+    sslk = ''
+    sslt = ''
+    sslp = ''
+    ssln = ''
     virtual_local_host = "" #default: assume physical local host
     host_check = "true"
     shell = "/bin/bash"
@@ -1400,6 +1411,11 @@ def main():
                     std_out                             = getParameterFromFile(firstWord, '-so', flagValue, flag_file, flag_log, std_out)
                     out_run_command                     = getParameterFromFile(firstWord, '-or', flagValue, flag_file, flag_log, out_run_command)
                     ssl                                 = getParameterFromFile(firstWord, '-ssl', flagValue, flag_file, flag_log, ssl)
+                    encryption                          = getParameterFromFile(firstWord, '-encr', flagValue, flag_file, flag_log, encryption)
+                    sslk                                = getParameterFromFile(firstWord, '-sslk', flagValue, flag_file, flag_log, sslk)
+                    sslt                                = getParameterFromFile(firstWord, '-sslt', flagValue, flag_file, flag_log, sslt)
+                    sslp                                = getParameterFromFile(firstWord, '-sslp', flagValue, flag_file, flag_log, sslp)
+                    ssln                                = getParameterFromFile(firstWord, '-ssln', flagValue, flag_file, flag_log, ssln)
                     virtual_local_host                  = getParameterFromFile(firstWord, '-vlh', flagValue, flag_file, flag_log, virtual_local_host)
                     host_check                          = getParameterFromFile(firstWord, '-hc', flagValue, flag_file, flag_log, host_check)
                     shell                               = getParameterFromFile(firstWord, '-sh', flagValue, flag_file, flag_log, shell)
@@ -1473,6 +1489,11 @@ def main():
     std_out                             = getParameterFromCommandLine(sys.argv, '-so', flag_log, std_out)
     out_run_command                     = getParameterFromCommandLine(sys.argv, '-or', flag_log, out_run_command)
     ssl                                 = getParameterFromCommandLine(sys.argv, '-ssl', flag_log, ssl)
+    encryption                          = getParameterFromCommandLine(sys.argv, '-encr', flag_log, encryption)
+    sslk                                = getParameterFromCommandLine(sys.argv, '-sslk', flag_log, sslk)
+    sslt                                = getParameterFromCommandLine(sys.argv, '-sslt', flag_log, sslt)
+    sslp                                = getParameterFromCommandLine(sys.argv, '-sslp', flag_log, sslp)
+    ssln                                = getParameterFromCommandLine(sys.argv, '-ssln', flag_log, ssln)
     virtual_local_host                  = getParameterFromCommandLine(sys.argv, '-vlh', flag_log, virtual_local_host)
     host_check                          = getParameterFromCommandLine(sys.argv, '-hc', flag_log, host_check)
     shell                               = getParameterFromCommandLine(sys.argv, '-sh', flag_log, shell)
@@ -1551,8 +1572,25 @@ def main():
     hdbsql_string = "hdbsql "
     if ssl:
         hdbsql_string = "hdbsql -e -ssltrustcert -sslcreatecert "
+    ### encryption, -encr
+    encryption = checkAndConvertBooleanFlag(encryption, "-encr")
+    if encryption:
+        hdbsql_string = hdbsql_string + " -e "
+    ### hdbsql_env_variable, -hev
     if hdbsql_env_variable:
         hdbsql_string = hdbsql_string + " $" + hdbsql_env_variable
+    ### sslk, -sslk
+    if sslk:
+        hdbsql_string = hdbsql_string + " -sslkeystore " + sslk
+    ### sslt, -sslt
+    if sslt:
+        hdbsql_string = hdbsql_string + " -ssltruststore " + sslt
+    ### sslp, -sslp
+    if sslp:
+        hdbsql_string = hdbsql_string + " -sslprovider " + sslp
+    ### ssln, -ssln
+    if ssln:
+        hdbsql_string = hdbsql_string + " -sslhostnameincert " + ssln
     ### min_avg_exec_time_diff_pct, -sc
     if not is_integer(min_avg_exec_time_diff_pct):
         log("INPUT ERROR: -sc must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
