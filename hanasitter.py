@@ -113,6 +113,7 @@ def printHelp():
     print("                                       for -rm = 3: time the thread waits after an rte dump,     default: 60 seconds                                ")
     print(" -mr     rte dump mode [0 or 1], -mr = 0: normal rte dump,                                                                                          ")
     print("                                 -mr = 1: light rte dump mode, only rte dump with STACK_SHORT and THREADS sections, and some M_ views,  default: 0  ")
+    print(" -pr     profile for section restriction, see hdbcons -->  help runtimedump --> -p and SAP Note 2400007 #14 for more info, default ''               ")
     print(" -ns     number custom select outputs provided if the DB is considered in a potential critical situation,  default: 0 (not used)                    ")
     print(" -is     custom select interval [seconds], for -rm = 1: time it waits after a custom select,                                                        ")
     print("                                           for -rm = 2: time it waits after a custom select,                                                        ")
@@ -267,9 +268,10 @@ emailNotification = None
 
 ######################## DEFINE CLASSES ##################################
 class RTESetting:
-    def __init__(self, num_rtedumps, rtedumps_interval):
+    def __init__(self, num_rtedumps, rtedumps_interval, profile_for_section_restriction):
         self.num_rtedumps = num_rtedumps
         self.rtedumps_interval = rtedumps_interval
+        self.profile = profile_for_section_restriction
         
 class CallStackSetting:
     def __init__(self, num_callstacks, callstacks_interval):
@@ -562,7 +564,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-sh", "-hev", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-pr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-sh", "-hev", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -974,18 +976,24 @@ def record_callstack(callstacks_interval, hdbcons, comman):
     time.sleep(callstacks_interval)
     return total_printout 
  
-def record_rtedump(rtedumps_interval, hdbcons, comman):
+def record_rtedump(rtedumps_interval, profile_for_section_restriction, hdbcons, comman):
     total_printout = ""
+    profile_string = ""
+    if profile_for_section_restriction:
+        profile_string = " -p "+profile_for_section_restriction
     for hdbcons_string, hdbcons_host, hdbcons_service, hdbcons_port in zip(hdbcons.hdbcons_strings, hdbcons.hdbcons_hosts, hdbcons.hdbcons_services, hdbcons.hdbcons_ports):
         if hdbcons_host in hdbcons.hostsForRecording:
             tenantDBString = hdbcons.tenantDBName+"_" if hdbcons.is_tenant else ""
             start_time = datetime.now()
             if hdbcons.rte_mode == 0: # normal rte dump
                 filename = (comman.out_dir+"/rte_norm_"+hdbcons_host+"_"+hdbcons.SID+"_"+hdbcons_service+"_"+hdbcons_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
-                os.system(hdbcons_string+'runtimedump dump -c" > '+filename)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
+                cmd = hdbcons_string+'runtimedump dump -c'+profile_string+'" > '+filename
+                if comman.out_run_command:
+                    print("Will execute  os.system(cmd)  where cmd = \n", cmd)   
+                os.system(cmd)   # have to dump to std with -c and then to a file with >    since in case of scale-out  -f  does not work
             elif hdbcons.rte_mode == 1: # light rte dump 
                 filename = (comman.out_dir+"/rtedump_light_"+hdbcons_host+"_"+hdbcons.SID+"_"+hdbcons_service+"_"+hdbcons_port+"_"+tenantDBString+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")+".trc")
-                os.system(hdbcons_string+'runtimedump dump -c -s STACK_SHORT,THREADS" > '+filename)
+                os.system(hdbcons_string+'runtimedump dump -c -s STACK_SHORT,THREADS'+profile_string+'" > '+filename)
                 os.system(hdbcons_string+'statreg print -h -n M_JOBEXECUTORS_" >> '+filename)
                 os.system(hdbcons_string+'statreg print -h -n M_DEV_JOBEX_THREADGROUPS" >> '+filename)
                 os.system(hdbcons_string+'statreg print -h -n M_DEV_JOBEXWAITING" >> '+filename)
@@ -1028,7 +1036,7 @@ def record(recording_mode, rte, callstack, gstack, kprofiler, customsql, customq
         for p in recording_prio:
             if p == 1:
                 for i in range(rte.num_rtedumps):
-                    record_rtedump(rte.rtedumps_interval, hdbcons, comman)
+                    record_rtedump(rte.rtedumps_interval, rte.profile, hdbcons, comman)
             if p == 2:
                 for i in range(callstack.num_callstacks):
                     record_callstack(callstack.callstacks_interval, hdbcons, comman) 
@@ -1050,7 +1058,7 @@ def record(recording_mode, rte, callstack, gstack, kprofiler, customsql, customq
             for p in recording_prio:
                 if p == 1:
                     if i < rte.num_rtedumps:
-                        record_rtedump(rte.rtedumps_interval, hdbcons, comman)
+                        record_rtedump(rte.rtedumps_interval, rte.profile, hdbcons, comman)
                 if p == 2:
                     if i < callstack.num_callstacks:
                         record_callstack(callstack.callstacks_interval, hdbcons, comman)
@@ -1098,7 +1106,7 @@ def parallel_recording_wrapper(rec_types):
 
 def parallel_recording(record_type, recorder, hdbcons, comman):
     if record_type == 1:
-        return record_rtedump(recorder.rtedumps_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features, comman.out_run_command))
+        return record_rtedump(recorder.rtedumps_interval, recorder.profile, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features, comman.out_run_command))
     elif record_type == 2:
         return record_callstack(recorder.callstacks_interval, hdbcons, CommunicationManager(comman.dbuserkey, comman.out_dir, comman.log_dir, False, comman.hdbsql_string, comman.log_features, comman.out_run_command))
     elif record_type == 3:
@@ -1261,6 +1269,7 @@ def main():
     num_rtedumps = 0 #how many rtedumps?
     rtedumps_interval = 60 #seconds
     rte_mode = 0 # either 0 or 1 
+    profile_for_section_restriction = ''
     num_custom_sql_recordings = 0  #how many custom sqls?
     custom_sql_interval = 60 #seconds
     custom_sql_recording = '' #custom sql dump
@@ -1360,6 +1369,7 @@ def main():
                     num_rtedumps                        = getParameterFromFile(firstWord, '-nr', flagValue, flag_file, flag_log, num_rtedumps)
                     rtedumps_interval                   = getParameterFromFile(firstWord, '-ir', flagValue, flag_file, flag_log, rtedumps_interval)
                     rte_mode                            = getParameterFromFile(firstWord, '-mr', flagValue, flag_file, flag_log, rte_mode)
+                    profile_for_section_restriction     = getParameterFromFile(firstWord, '-pr', flagValue, flag_file, flag_log, profile_for_section_restriction)
                     num_custom_sql_recordings           = getParameterFromFile(firstWord, '-ns', flagValue, flag_file, flag_log, num_custom_sql_recordings)
                     custom_sql_interval                 = getParameterFromFile(firstWord, '-is', flagValue, flag_file, flag_log, custom_sql_interval)
                     custom_sql_recording                = getParameterFromFile(firstWord, '-cs', flagValue, flag_file, flag_log, custom_sql_recording)
@@ -1436,6 +1446,7 @@ def main():
     num_rtedumps                        = getParameterFromCommandLine(sys.argv, '-nr', flag_log, num_rtedumps)
     rtedumps_interval                   = getParameterFromCommandLine(sys.argv, '-ir', flag_log, rtedumps_interval)
     rte_mode                            = getParameterFromCommandLine(sys.argv, '-mr', flag_log, rte_mode)
+    profile_for_section_restriction     = getParameterFromCommandLine(sys.argv, '-pr', flag_log, profile_for_section_restriction)
     num_custom_sql_recordings           = getParameterFromCommandLine(sys.argv, '-ns', flag_log, num_custom_sql_recordings)
     custom_sql_interval                 = getParameterFromCommandLine(sys.argv, '-is', flag_log, custom_sql_interval)
     custom_sql_recording                = getParameterFromCommandLine(sys.argv, '-cs', flag_log, custom_sql_recording)
@@ -2073,7 +2084,7 @@ def main():
         log("After Recording: Sleep "+str(after_recorded)+" seconds", comman)
     log(" - - - - - Start HANASitter - - - - - - ", comman)
     log("Action            , Timestamp              , Duration         , Successful   , Result     , Comment ", comman)
-    rte = RTESetting(num_rtedumps, rtedumps_interval)
+    rte = RTESetting(num_rtedumps, rtedumps_interval, profile_for_section_restriction)
     callstack = CallStackSetting(num_callstacks, callstacks_interval)
     gstack = GStackSetting(num_gstacks, gstacks_interval)
     kprofiler = KernelProfileSetting(num_kprofs, kprofs_interval, kprofs_duration, kprofs_wait)
