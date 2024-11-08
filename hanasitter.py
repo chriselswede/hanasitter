@@ -162,6 +162,8 @@ def printHelp():
     print(" -vlh    virtual local host, if hanacleaner runs on a virtual host this has to be specified, default: '' (physical host is assumed)                 ")
     print(" -hc     host checking [true/false], checks if the host is the same as in cdtrace and provided in hdbuserkey, might be necessary to turn to false   ")
     print("         e.g. if you for some reason must provide full host name in hdbuserkey (it will still give warnings though), default: true                  ")
+    print(" -hi     high isolation [true/false], normally HANASitter detect if you have High Isolation, but if it doesn't and you claim you have               ")
+    print("         high isolation, can force HANASitter beliving you have with   -hi true    , default: false                                                 ")
     print(" -sh     shell, default: /bin/bash                                                                                                                  ")   
     print(" -hev    hdbsql environment variable, for any environment variable that should be added to the hdbsql command, do not include the $ sign, it will   ")
     print("         added automatically, e.g. -hev SSL_OPTIONS, default: ''                                                                                    ")             
@@ -564,7 +566,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-pr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-sh", "-hev", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-pr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-hi", "-sh", "-hev", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -1319,6 +1321,7 @@ def main():
     ssln = ''
     virtual_local_host = "" #default: assume physical local host
     host_check = "true"
+    claim_high_isolation = "false"
     shell = "/bin/bash"
     hdbsql_env_variable = ''
     dbuserkey = 'SYSTEMKEY' # This KEY has to be maintained in hdbuserstore  
@@ -1428,6 +1431,7 @@ def main():
                     ssln                                = getParameterFromFile(firstWord, '-ssln', flagValue, flag_file, flag_log, ssln)
                     virtual_local_host                  = getParameterFromFile(firstWord, '-vlh', flagValue, flag_file, flag_log, virtual_local_host)
                     host_check                          = getParameterFromFile(firstWord, '-hc', flagValue, flag_file, flag_log, host_check)
+                    claim_high_isolation                = getParameterFromFile(firstWord, '-hi', flagValue, flag_file, flag_log, claim_high_isolation)
                     shell                               = getParameterFromFile(firstWord, '-sh', flagValue, flag_file, flag_log, shell)
                     hdbsql_env_variable                 = getParameterFromFile(firstWord, '-hev', flagValue, flag_file, flag_log, hdbsql_env_variable)
                     dbuserkey                           = getParameterFromFile(firstWord, '-k', flagValue, flag_file, flag_log, dbuserkey)
@@ -1507,6 +1511,7 @@ def main():
     ssln                                = getParameterFromCommandLine(sys.argv, '-ssln', flag_log, ssln)
     virtual_local_host                  = getParameterFromCommandLine(sys.argv, '-vlh', flag_log, virtual_local_host)
     host_check                          = getParameterFromCommandLine(sys.argv, '-hc', flag_log, host_check)
+    claim_high_isolation                = getParameterFromCommandLine(sys.argv, '-hi', flag_log, claim_high_isolation)
     shell                               = getParameterFromCommandLine(sys.argv, '-sh', flag_log, shell)
     hdbsql_env_variable                 = getParameterFromCommandLine(sys.argv, '-hev', flag_log, hdbsql_env_variable)
     dbuserkey                           = getParameterFromCommandLine(sys.argv, '-k', flag_log, dbuserkey)
@@ -1556,6 +1561,8 @@ def main():
             print("WARNING: The hosts provided with the user key, "+dbuserkey+", do not all have the same instance number. They should. Continue on your own risk!")
     local_dbinstance = dbinstances[local_host_index]
     SID = run_command('whoami').replace('\n','').replace('adm','').upper()
+    ### claim_high_isolation, -hi
+    claim_high_isolation = checkAndConvertBooleanFlag(claim_high_isolation, "-hi")
 
     ############# OUTPUT DIRECTORIES #########
     out_dir = out_dir.replace(" ","_")
@@ -1679,7 +1686,8 @@ def main():
         print("WARNING: Something went wrong, it passed online tests but still no tenant names were found. Is this HANA 1? HANA 1 is not supported as of May 2021.")
         #os._exit(1)
     ### TENANT NAMES for NON HIGH-ISOLATED MDC ###
-    if tenantDBNames.count(tenantDBNames[0]) == len(tenantDBNames) and tenantDBNames[0] == SID:   # if all tenant names are equal and equal to SystemDB's SID, then it is non-high-isolation --> get tenant names using daemon instead
+    high_isolation = not (tenantDBNames.count(tenantDBNames[0]) == len(tenantDBNames) and tenantDBNames[0] == SID) or claim_high_isolation
+    if not high_isolation:   # if all tenant names are equal and equal to SystemDB's SID, then it is non-high-isolation --> get tenant names using daemon instead
         [tenantDBNames, tenantIndexserverPorts] = tenant_names_and_ports(host_folder+"/daemon.ini") # if non-high isolation the tenantIndexserverPorts from HDB info could be wrong order
 
     ####### COMMUNICATION PORT (i.e. nameserver port if SystemDB at MDC, or indexserver port if TenantDB and if non-MDC) ########
@@ -2006,7 +2014,7 @@ def main():
             for hdbconshost in used_hosts:
                 hdbconsport = getServiceHostPort(hdbconsservice, hdbconshost, tenantDBName, local_dbinstance, shell)
                 if not hdbconsport == '-1':
-                    if len(hosts_worker_and_standby) > 1:
+                    if len(hosts_worker_and_standby) > 1 or high_isolation:    #SAP Note 2410143 says high isolation must use  distribute e
                         hdbcons.create_hdbcons_string(hdbconshost, hdbconsport, hdbconsservice)
                     else:
                         hdbcons.create_hdbcons_string_scale_up(hdbconshost, hdbconsport, hdbconsservice)
@@ -2016,7 +2024,7 @@ def main():
            # that could be an indexserver or the nameserver, i.e. -d, see SAP Note 2222218, is not used   
         for hdbconshost in used_hosts:
             hdbconsservice = "indexserver" if is_tenant else "nameserver"
-            if len(hosts_worker_and_standby) > 1:
+            if len(hosts_worker_and_standby) > 1 or high_isolation:     #SAP Note 2410143 says high isolation must use  distribute e
                 hdbcons.create_hdbcons_string(hdbconshost, communicationPort, hdbconsservice)
             else:
                 hdbcons.create_hdbcons_string_scale_up(hdbconshost, communicationPort, hdbconsservice)
