@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime
+from datetime import datetime, timedelta
 from threading import Timer
 import sys, time, os, subprocess
 from multiprocessing import Pool
@@ -68,6 +68,8 @@ def printHelp():
     print("         Note: It might be better to do your own investigation on HOST_SQL_PLAN_CACHE after you got the potential critical engine changes from -sc  ")
     print(" -scn    only negative changes [false/true], if true will only show engine changes that made performance worse, default: false                      ")
     print(" -scx    number characters of the sql text printed together with the outputs defined by -scp, default: 0                                            ")
+    print(" -scd    number of days to take into account, this specifies how many days back we want to include from the SQL plan cache for the diff check (-sc) ")
+    print("         default: the whole SQL plan cache is taken into account                                                                                    ")
     print(" -lf     log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
     print("         Note: For safety reasons, -lf is not available anymore, unless you enable it yourself in the python code.                                  ")
     print(" -ci     check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
@@ -517,7 +519,7 @@ class HashCache:
             print("Hash: ", self.hash, "  Engines: ", self.engines[i], "  Average Execution Time [ms]: ", self.avg_exec_ms[i], "  Diff of Avg Exec Time [%]: ", self.diff_avg_exec_pct[i], "  Execution Count:", self.exec_count[i], "   Total Execution Time [m]", self.tot_exec_time_minutes[i], "  Max snapshot time: ", self.max_snp_time[i])
         
 class SCCManager:
-    def __init__(self, min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len):
+    def __init__(self, min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len, nbrDaysToTakeIntoAcount):
         self.min_avg_exec_time_diff_pct = min_avg_exec_time_diff_pct
         self.plan_id_changes = plan_id_changes
         self.min_exec_counts = min_exec_counts
@@ -525,6 +527,7 @@ class SCCManager:
         self.h_print_engine_changes = h_print_engine_changes
         self.only_negative_changes = only_negative_changes
         self.sql_text_len = sql_text_len
+        self.nbrDaysToTakeIntoAcount = nbrDaysToTakeIntoAcount
 
 ######################## DEFINE FUNCTIONS ################################
 
@@ -566,7 +569,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-pr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-hi", "-sh", "-hev", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-pr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-scd", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-hi", "-sh", "-hev", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -858,7 +861,8 @@ def sqlCacheCheck(sccmanager, comman):
         change_type = 'EXECUTION_ENGINE'
         change_type_description = 'engine changes'
         change_title = 'Engines'
-    hashes_with_engine_change = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select STATEMENT_HASH from (select STATEMENT_HASH, '+change_type+' from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE group by STATEMENT_HASH, '+change_type+' order by STATEMENT_HASH) group by STATEMENT_HASH having count(*) > 1"').splitlines(1)
+    oldestDayToTakeIntoAccount = datetime.now() + timedelta(days = -int(sccmanager.nbrDaysToTakeIntoAcount))
+    hashes_with_engine_change = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select STATEMENT_HASH from (select STATEMENT_HASH, '+change_type+' from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where SERVER_TIMESTAMP > \''+oldestDayToTakeIntoAccount.strftime('%Y-%m-%d')+' 00:00:00\' group by STATEMENT_HASH, '+change_type+' order by STATEMENT_HASH) group by STATEMENT_HASH having count(*) > 1"').splitlines(1)
     nbr_hashes_with_engine_change = len(hashes_with_engine_change)
     if nbr_hashes_with_engine_change > 0:
         hashes_with_engine_change = [hash.strip('\n').strip('|').strip(' ') for hash in hashes_with_engine_change]
@@ -1308,6 +1312,7 @@ def main():
     h_print_engine_changes = "0"
     only_negative_changes = "false"
     sql_text_len = "0"
+    nbrDaysToTakeIntoAcount = "9999"
     log_features = "false"
     receiver_emails = None
     email_client = ''   #default email client, mailx, will be specifed later if -enc not provided
@@ -1416,6 +1421,7 @@ def main():
                     h_print_engine_changes              = getParameterFromFile(firstWord, '-scp', flagValue, flag_file, flag_log, h_print_engine_changes)
                     only_negative_changes               = getParameterFromFile(firstWord, '-scn', flagValue, flag_file, flag_log, only_negative_changes)
                     sql_text_len                        = getParameterFromFile(firstWord, '-scx', flagValue, flag_file, flag_log, sql_text_len)
+                    nbrDaysToTakeIntoAcount             = getParameterFromFile(firstWord, '-scd', flagValue, flag_file, flag_log, nbrDaysToTakeIntoAcount)
                     log_features                        = getParameterFromFile(firstWord, '-lf', flagValue, flag_file, flag_log, log_features)
                     receiver_emails                     = getParameterListFromFile(firstWord, '-en', flagValue, flag_file, flag_log, receiver_emails)
                     email_client                        = getParameterFromFile(firstWord, '-enc', flagValue, flag_file, flag_log, email_client)
@@ -1496,6 +1502,7 @@ def main():
     h_print_engine_changes              = getParameterFromCommandLine(sys.argv, '-scp', flag_log, h_print_engine_changes)
     only_negative_changes               = getParameterFromCommandLine(sys.argv, '-scn', flag_log, only_negative_changes)
     sql_text_len                        = getParameterFromCommandLine(sys.argv, '-scx', flag_log, sql_text_len)
+    nbrDaysToTakeIntoAcount             = getParameterFromCommandLine(sys.argv, '-scd', flag_log, nbrDaysToTakeIntoAcount)
     log_features                        = getParameterFromCommandLine(sys.argv, '-lf', flag_log, log_features)
     receiver_emails                     = getParameterListFromCommandLine(sys.argv, '-en', flag_log, receiver_emails)
     email_client                        = getParameterFromCommandLine(sys.argv, '-enc', flag_log, email_client)
@@ -1644,8 +1651,13 @@ def main():
     if sql_text_len and not h_print_engine_changes:
         log("INPUT ERROR: -scx is more then 0 while -scp is not, this makes no sense. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1) 
+    ### nbrDaysToTakeIntoAcount, -scd
+    if not is_integer(nbrDaysToTakeIntoAcount):
+        log("INPUT ERROR: -scd must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
+        os._exit(1)
+    nbrDaysToTakeIntoAcount = int(nbrDaysToTakeIntoAcount)
     ########## SQL Cache Check Manager #################
-    sccmanager = SCCManager(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len)
+    sccmanager = SCCManager(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len, nbrDaysToTakeIntoAcount)
     ### log_features, -lf
     log_features = checkAndConvertBooleanFlag(log_features, "-lf")
     if log_features:
