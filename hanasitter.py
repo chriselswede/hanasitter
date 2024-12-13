@@ -699,23 +699,24 @@ def tenant_names_and_ports(daemon_file):
     foundInstanceIds = False
     with open(daemon_file) as f:
         for line in f:
-            if not foundNewName and "[indexserver." in line:
-                tenantDBNames.append(line.strip("[indexserver.").strip("\n").strip("]"))
-                foundNewName = True
-            elif foundNewName and not foundFirstPortHalf and "arguments = -port " in line:
-                ports_first_halfs.append(line.strip("arguments = -port ").split("$")[0])
-                foundFirstPortHalf = True
-            elif foundNewName and not foundInstanceIds and "instanceids = " in line:
-                ports_second_halfs.append(line.strip("instanceids = ").strip("\n"))
-                foundInstanceIds = True
-            elif foundNewName and not line.strip("\n"):  # the order of instance ids and arguments are different in SPS03 and SPS04
-                if foundFirstPortHalf and foundInstanceIds:
-                    foundNewName = False
-                    foundFirstPortHalf = False
-                    foundInstanceIds = False
-                else:
-                    print("ERROR, something went wrong while reading the daemon.ini file")
-                    os._exit(1)
+            if not line[0] == '#':  #starting with SPS08 there are strange comments lines in the daemon.ini file, lets ignore those lines
+                if not foundNewName and "[indexserver." in line:
+                    tenantDBNames.append(line.strip("[indexserver.").strip("\n").strip("]"))
+                    foundNewName = True
+                elif foundNewName and not foundFirstPortHalf and "arguments = -port " in line:
+                    ports_first_halfs.append(line.strip("arguments = -port ").split("$")[0])
+                    foundFirstPortHalf = True
+                elif foundNewName and not foundInstanceIds and "instanceids = " in line:
+                    ports_second_halfs.append(line.strip("instanceids = ").strip("\n"))
+                    foundInstanceIds = True
+                elif foundNewName and not line.strip("\n"):  # the order of instance ids and arguments are different in SPS03 and SPS04
+                    if foundFirstPortHalf and foundInstanceIds:
+                        foundNewName = False
+                        foundFirstPortHalf = False
+                        foundInstanceIds = False
+                    else:
+                        print("ERROR, something went wrong while reading the daemon.ini file")
+                        os._exit(1)
         tenantIndexserverPorts = [first+second for first, second in zip(ports_first_halfs, ports_second_halfs)]
     return [tenantDBNames, tenantIndexserverPorts]
 
