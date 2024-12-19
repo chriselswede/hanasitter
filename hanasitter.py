@@ -61,14 +61,17 @@ def printHelp():
     print("         CPU check, Ping check or Feature Check),                               default: -1  (the sql cache check is not executed)                  ")  
     print(" -spi    use plan id change instead of engine change [true/false], if this is true the -sc check will be done for each Plan ID change instead of    ")
     print("         only Execution Engine change (as per default), default: false                                                                              ")
-    print('         Note: Use with care! If HANASitter stops with the exception "Argument list too long" stop using -spi or restrict more with -scc and -sct   ') 
+    print('         Note: Use with care! If HANASitter stops with the exception "Argument list too long" stop using -spi or restrict more with -scc, -sct, -scd') 
     print(" -scc    min execution count to be considered in the sql cache check,   default: 0     (consider even if only executed once after engine change)    ")
     print(" -sct    min total execution time [minutes] to be considered in the sql cache check, default: 0  (consider even if total execution time is almost 0)")
     print(" -scp    number hours printed before and after the max snapshot time of a potential critical engine change, default: 0    (nothing will be printed) ")
     print("         Note: It might be better to do your own investigation on HOST_SQL_PLAN_CACHE after you got the potential critical engine changes from -sc  ")
     print(" -scn    only negative changes [false/true], if true will only show engine changes that made performance worse, default: false                      ")
     print(" -scx    number characters of the sql text printed together with the outputs defined by -scp, default: 0                                            ")
-    print(" -scd    number of days to take into account, this specifies how many days back we want to include from the SQL plan cache for the diff check (-sc) ")
+    print(" -scd    number of days to take into account, this specifies how many days back we want to include from the SQL plan cache to look for changes      ")
+    print("         in the engine (-sc) and/or changes in the plan id (-spi) default: the whole SQL plan cache is taken into account                           ")
+    print(" -scs    number of days to take into account for statistics, this specified how many days back we want to include from the SQL plan cache to        ")
+    print("         calculate average difference in percentage of execution duration, to compare with limit provided by -sc,                                   ")
     print("         default: the whole SQL plan cache is taken into account                                                                                    ")
     print(" -lf     log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
     print("         Note: For safety reasons, -lf is not available anymore, unless you enable it yourself in the python code.                                  ")
@@ -519,7 +522,7 @@ class HashCache:
             print("Hash: ", self.hash, "  Engines: ", self.engines[i], "  Average Execution Time [ms]: ", self.avg_exec_ms[i], "  Diff of Avg Exec Time [%]: ", self.diff_avg_exec_pct[i], "  Execution Count:", self.exec_count[i], "   Total Execution Time [m]", self.tot_exec_time_minutes[i], "  Max snapshot time: ", self.max_snp_time[i])
         
 class SCCManager:
-    def __init__(self, min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len, nbrDaysToTakeIntoAcount):
+    def __init__(self, min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len, nbrDaysToTakeIntoAcount, nbrDaysToTakeIntoAcountForStat):
         self.min_avg_exec_time_diff_pct = min_avg_exec_time_diff_pct
         self.plan_id_changes = plan_id_changes
         self.min_exec_counts = min_exec_counts
@@ -528,6 +531,7 @@ class SCCManager:
         self.only_negative_changes = only_negative_changes
         self.sql_text_len = sql_text_len
         self.nbrDaysToTakeIntoAcount = nbrDaysToTakeIntoAcount
+        self.nbrDaysToTakeIntoAcountForStat = nbrDaysToTakeIntoAcountForStat
 
 ######################## DEFINE FUNCTIONS ################################
 
@@ -569,7 +573,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-pr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-scd", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-hi", "-sh", "-hev", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-pr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-scd", "-scs", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-hi", "-sh", "-hev", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -863,12 +867,13 @@ def sqlCacheCheck(sccmanager, comman):
         change_type_description = 'engine changes'
         change_title = 'Engines'
     oldestDayToTakeIntoAccount = datetime.now() + timedelta(days = -int(sccmanager.nbrDaysToTakeIntoAcount))
+    oldestDayToTakeIntoAccountForStat = datetime.now() + timedelta(days = -int(sccmanager.nbrDaysToTakeIntoAcountForStat))
     hashes_with_engine_change = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select STATEMENT_HASH from (select STATEMENT_HASH, '+change_type+' from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where SERVER_TIMESTAMP > \''+oldestDayToTakeIntoAccount.strftime('%Y-%m-%d')+' 00:00:00\' group by STATEMENT_HASH, '+change_type+' order by STATEMENT_HASH) group by STATEMENT_HASH having count(*) > 1"').splitlines(1)
     nbr_hashes_with_engine_change = len(hashes_with_engine_change)
     if nbr_hashes_with_engine_change > 0:
         hashes_with_engine_change = [hash.strip('\n').strip('|').strip(' ') for hash in hashes_with_engine_change]
         hashes_with_engine_change = "', '".join(hashes_with_engine_change)
-        select_string = "select MAX(RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20)) MAX_SNP_TIME, STATEMENT_HASH HASH,  LPAD(TO_DECIMAL(SUM(TOTAL_EXECUTION_TIME)/SUM(EXECUTION_COUNT)/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(SUM(EXECUTION_COUNT), 11) EXEC_COUNT, "+change_type+", LPAD(TO_DECIMAL(SUM(TOTAL_EXECUTION_TIME)/1000/1000/60, 10, 0), 11) TOT_EXEC_MINUTES from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH in ('"+hashes_with_engine_change+"') group by STATEMENT_HASH, "+change_type+" order by STATEMENT_HASH"
+        select_string = "select MAX(RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20)) MAX_SNP_TIME, STATEMENT_HASH HASH,  LPAD(TO_DECIMAL(SUM(TOTAL_EXECUTION_TIME)/SUM(EXECUTION_COUNT)/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(SUM(EXECUTION_COUNT), 11) EXEC_COUNT, "+change_type+", LPAD(TO_DECIMAL(SUM(TOTAL_EXECUTION_TIME)/1000/1000/60, 10, 0), 11) TOT_EXEC_MINUTES from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where SERVER_TIMESTAMP > '"+oldestDayToTakeIntoAccountForStat.strftime('%Y-%m-%d')+" 00:00:00' and STATEMENT_HASH in ('"+hashes_with_engine_change+"') group by STATEMENT_HASH, "+change_type+" order by STATEMENT_HASH"
         output_table = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"', comman.out_run_command).splitlines(1)
         HashCaches = {}
         for table_row in output_table:
@@ -901,7 +906,7 @@ def sqlCacheCheck(sccmanager, comman):
             if sccmanager.h_print_engine_changes:
                 for h,hc in HashCaches.items():
                     for max_snp_time in hc.max_snp_time:
-                        select_string = "select RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20) SNP_TIME, STATEMENT_HASH HASH, LPAD(TO_DECIMAL(TOTAL_EXECUTION_TIME/EXECUTION_COUNT/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(EXECUTION_COUNT, 11) EXEC_COUNT, "+change_type+" from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH = '"+h+"' and SERVER_TIMESTAMP > ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), -"+str(sccmanager.h_print_engine_changes)+"*3600) and SERVER_TIMESTAMP < ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), "+str(sccmanager.h_print_engine_changes)+"*3600)"
+                        select_string = "select RPAD(TO_VARCHAR(SERVER_TIMESTAMP, 'YYYY/MM/DD HH24:MI:SS'), 20) SNP_TIME, STATEMENT_HASH HASH, LPAD(TO_DECIMAL(TOTAL_EXECUTION_TIME/EXECUTION_COUNT/1000, 10, 2), 11) AVG_EXEC_MS, LPAD(EXECUTION_COUNT, 11) EXEC_COUNT, "+change_type+" from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where SERVER_TIMESTAMP > '"+oldestDayToTakeIntoAccountForStat.strftime('%Y-%m-%d')+" 00:00:00' and STATEMENT_HASH = '"+h+"' and SERVER_TIMESTAMP > ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), -"+str(sccmanager.h_print_engine_changes)+"*3600) and SERVER_TIMESTAMP < ADD_SECONDS(TO_TIMESTAMP('"+max_snp_time+"', 'YYYY/MM/DD HH24:MI:SS'), "+str(sccmanager.h_print_engine_changes)+"*3600)"
                         output_table = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"', comman.out_run_command).splitlines(1)
                         header_list = ["Max snapshot time", "Hash", "Avg Exec Time [ms]", "Execution Count", change_title]
                         sql_text = ''
@@ -1314,6 +1319,7 @@ def main():
     only_negative_changes = "false"
     sql_text_len = "0"
     nbrDaysToTakeIntoAcount = "9999"
+    nbrDaysToTakeIntoAcountForStat = "9999"
     log_features = "false"
     receiver_emails = None
     email_client = ''   #default email client, mailx, will be specifed later if -enc not provided
@@ -1423,6 +1429,7 @@ def main():
                     only_negative_changes               = getParameterFromFile(firstWord, '-scn', flagValue, flag_file, flag_log, only_negative_changes)
                     sql_text_len                        = getParameterFromFile(firstWord, '-scx', flagValue, flag_file, flag_log, sql_text_len)
                     nbrDaysToTakeIntoAcount             = getParameterFromFile(firstWord, '-scd', flagValue, flag_file, flag_log, nbrDaysToTakeIntoAcount)
+                    nbrDaysToTakeIntoAcountForStat      = getParameterFromFile(firstWord, '-scs', flagValue, flag_file, flag_log, nbrDaysToTakeIntoAcountForStat)
                     log_features                        = getParameterFromFile(firstWord, '-lf', flagValue, flag_file, flag_log, log_features)
                     receiver_emails                     = getParameterListFromFile(firstWord, '-en', flagValue, flag_file, flag_log, receiver_emails)
                     email_client                        = getParameterFromFile(firstWord, '-enc', flagValue, flag_file, flag_log, email_client)
@@ -1504,6 +1511,7 @@ def main():
     only_negative_changes               = getParameterFromCommandLine(sys.argv, '-scn', flag_log, only_negative_changes)
     sql_text_len                        = getParameterFromCommandLine(sys.argv, '-scx', flag_log, sql_text_len)
     nbrDaysToTakeIntoAcount             = getParameterFromCommandLine(sys.argv, '-scd', flag_log, nbrDaysToTakeIntoAcount)
+    nbrDaysToTakeIntoAcountForStat      = getParameterFromCommandLine(sys.argv, '-scs', flag_log, nbrDaysToTakeIntoAcountForStat)
     log_features                        = getParameterFromCommandLine(sys.argv, '-lf', flag_log, log_features)
     receiver_emails                     = getParameterListFromCommandLine(sys.argv, '-en', flag_log, receiver_emails)
     email_client                        = getParameterFromCommandLine(sys.argv, '-enc', flag_log, email_client)
@@ -1657,8 +1665,13 @@ def main():
         log("INPUT ERROR: -scd must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
         os._exit(1)
     nbrDaysToTakeIntoAcount = int(nbrDaysToTakeIntoAcount)
+    ### nbrDaysToTakeIntoAcountForStat, -scs
+    if not is_integer(nbrDaysToTakeIntoAcountForStat):
+        log("INPUT ERROR: -scs must be an integer. Please see --help for more information.", CommunicationManager(dbuserkey, out_dir, log_dir, std_out, hdbsql_string, False, False))
+        os._exit(1)
+    nbrDaysToTakeIntoAcountForStat = int(nbrDaysToTakeIntoAcountForStat)
     ########## SQL Cache Check Manager #################
-    sccmanager = SCCManager(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len, nbrDaysToTakeIntoAcount)
+    sccmanager = SCCManager(min_avg_exec_time_diff_pct, plan_id_changes, min_exec_counts, min_tot_exec_time_minutes, h_print_engine_changes, only_negative_changes, sql_text_len, nbrDaysToTakeIntoAcount, nbrDaysToTakeIntoAcountForStat)
     ### log_features, -lf
     log_features = checkAndConvertBooleanFlag(log_features, "-lf")
     if log_features:
