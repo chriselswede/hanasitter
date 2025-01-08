@@ -386,8 +386,10 @@ class HdbconsManager:
         self.hdbcons_services.append(service)                  # SAP Note 2222218
         if self.tenantDBName:
             self.hdbcons_strings.append('hdbcons -e hdb'+service+' -d '+self.tenantDBName+' "')
+        elif not self.is_tenant:
+            self.hdbcons_strings.append('hdbcons -e hdbnameserver "')  #hdbcons developers: "in case of a problem it is more likely to get useful results by connecting directly"
         else:
-            self.hdbcons_strings.append('hdbcons "')  #hdbcons developers: "in case of a problem it is more likely to get useful results by connecting directly"
+            self.hdbcons_strings.append('hdbcons "')   #hdbcons developers: "in case of a problem it is more likely to get useful results by connecting directly" (default is indexserver)
     def print_service_host_ports(self):
         print("Services to record from:")
         print("Host:                         Service:                      Port:                         Host:Port")
