@@ -75,7 +75,8 @@ def printHelp():
     print("         default: the whole SQL plan cache is taken into account                                                                                    ")
     print(" -lf     log features [true/false], logging ALL information of ALL critical features (beware: could be costly!), default: false                     ")
     print("         Note: For safety reasons, -lf is not available anymore, unless you enable it yourself in the python code.                                  ")
-    print(" -ci     check interval [seconds], time it waits before it checks cpu, pings and check features again, default: 60 seconds                          ") 
+    print(" -ci     check interval [seconds], time it waits before it checks cpu, pings and check features again,                                              ")
+    print("         if set to 0 HANASitter will not continue even if it does not find any reason to record,                          default: 60 seconds       ") 
     print(" -ar     time to sleep after recording [seconds], if negative it exits, default: -1                                                                 ")
     print("         *** RECORDINGS (GStacks and/or Kernel Profiler Traces and/or Call Stacks and/or RTE dumps and/or Output from Custom SQL) ***               ")
     print(" -sv     services [indexserver, nameserver, compileserver, preprocessor, docstore, dpserver, scriptserver, xsengine, diserver, and/or webdispatcher]")
@@ -1202,6 +1203,10 @@ def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack
                 if nbr_hashes_with_critical_engine_change > 0:
                     recorded = record(recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, hdbcons, comman)
         if not recorded:
+            if check_interval == 0:
+                log("HANASitter did not find any reason to record. Will now exit tracker since -ci = 0", comman, sendEmail = hanging or offline) 
+                return [False, False]
+            log("HANASitter did not find any reason to record. Will now sleep for "+str(check_interval)+" seconds (-ci)", comman, sendEmail = hanging or offline) 
             time.sleep(check_interval)
         #house keeping
         if minRetainedLogDays >= 0:   # automatic house keeping of hanasitter logs
@@ -2072,6 +2077,8 @@ def main():
     log("Online, Primary and Not-Secondary Check: Interval = "+str(online_test_interval)+" seconds", comman)
     if ping_timeout == 0:
         log("Ping Check: None", comman)
+    elif check_interval == 0:
+        log("Ping Check: Timeout = "+str(ping_timeout)+" seconds, If nothing is found HANASitter will exit since -ci = 0", comman)
     else:
         log("Ping Check: Interval = "+str(check_interval)+" seconds, Timeout = "+str(ping_timeout)+" seconds", comman)
     log("Feature Checks: Interval "+str(check_interval)+" seconds, Timeout = "+str(feature_check_timeout)+" seconds", comman)
@@ -2139,6 +2146,10 @@ def main():
                         hdbcons.clear()    #remove temporary output folders before exit
                         sys.exit()
                     time.sleep(float(after_recorded))  # after recorded call stacks and/or rte dumps it sleeps a bit and then continues tracking if HANA is online
+                if not recorded and not offline and check_interval == 0:  
+                    hdbcons.clear()    #remove temporary output folders before exit
+                    log("\nSince -ci = 0 HANASitter will now stop even if no reson for recording was found.\n", comman)
+                    sys.exit()
                 if offline:
                     log("\nDuring the tracking hana turned offline. HANASitter will now have a "+str(online_test_interval)+" seconds break.\n", comman, sendEmail = True)
                     time.sleep(float(online_test_interval))  # wait online_test_interval seconds before again checking if HANA is running
