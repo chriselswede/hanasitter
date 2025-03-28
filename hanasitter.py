@@ -65,6 +65,7 @@ def printHelp():
     print(" -scc    min execution count to be considered in the sql cache check,   default: 0     (consider even if only executed once after engine change)    ")
     print(" -sct    min total execution time [minutes] to be considered in the sql cache check, default: 0  (consider even if total execution time is almost 0)")
     print(" -scp    number hours printed before and after the max snapshot time of a potential critical engine change, default: 0    (nothing will be printed) ")
+    print("         Note: If nothing is printed try to increase -scp so that it will include an engine change                                                  ")
     print("         Note: It might be better to do your own investigation on HOST_SQL_PLAN_CACHE after you got the potential critical engine changes from -sc  ")
     print(" -scn    only negative changes [false/true], if true will only show engine changes that made performance worse, default: false                      ")
     print(" -scx    number characters of the sql text printed together with the outputs defined by -scp, default: 0                                            ")
@@ -920,7 +921,7 @@ def sqlCacheCheck(sccmanager, comman):
                             sql_text = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"', comman.out_run_command).strip(' ').strip('|').strip(' ')
                         if sql_text: 
                             header_list.append("SQL Text")
-                        app_source = ''
+                        app_source_name = ''
                         if sccmanager.app_source_len > 0:
                             select_string = "select top 1 LPAD(APPLICATION_SOURCE, "+str(sccmanager.app_source_len)+") SQL_TEXT from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where STATEMENT_HASH = '"+h+"'"
                             app_source_name = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "'+select_string+'"', comman.out_run_command).strip(' ').strip('|').strip(' ')
@@ -936,7 +937,7 @@ def sqlCacheCheck(sccmanager, comman):
                                 table_row.append(app_source_name)
                             values_lists.append(table_row)
                         engine_change_at_least_once = any([values_lists[i][4] != values_lists[i+1][4] for i in range(len(values_lists) - 1)])
-                        if engine_change_at_least_once:
+                        if engine_change_at_least_once: # if no engine change found here, nothing will be printed, then try increasing -scp
                             table_printout += "\n"+print_table(header_list, values_lists)
             stop_time = datetime.now()
             printout = "SQL Cache Check   , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   , True         , False      , There are hashes with potential critical "+change_type_description+" "
@@ -1144,6 +1145,7 @@ def parallel_recording(record_type, recorder, hdbcons, comman):
 def tracker(ping_timeout, check_interval, recording_mode, rte, callstack, gstack, kprofiler, customsql, customquer, recording_prio, critical_features, feature_check_timeout, cpu_check_params, sccmanager, minRetainedLogDays, minRetainedOutputDays, host_mode, local_dbinstance, comman, hdbcons):   
     recorded = False
     offline = False
+    hanging = False
     while not recorded:
         # Host online check
         if not is_online(local_dbinstance, comman):
