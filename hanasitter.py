@@ -127,6 +127,7 @@ def printHelp():
     print("                                           for -rm = 2: time it waits after a custom select,                                                        ")
     print("                                           for -rm = 3: time the thread waits after a custom select,     default: 60 seconds                        ")
     print(" -cs     custom sql, this SELECT statement defines the output (see the -cs example below),     default: ''  (not used)                              ")
+    print(" -cse    custom sql email, if 'true' the result of -cs will additionally be send as email(s), default: false                                        ")
     print(" -cq     custom queries, a list of queries that will be executed (-cd decides deliminiter mode also for -cq),              default: '' (not used)   ")
     print(" -iq     custom query waits [comma seperated list (same length as -cq) of integers = seconds],                                                      ")
     print("                                           for -rm = 1: time it waits after a custom query,             default: none, it must be defined           ")
@@ -312,12 +313,13 @@ class CustomQuerySetting:
         self.custom_query_waits = custom_query_waits
 
 class EmailNotification:
-    def __init__(self, receiverEmails, emailClient, senderEmail, mailServer, SID):
+    def __init__(self, receiverEmails, emailClient, senderEmail, mailServer, SID, send_custom_sql):
         self.senderEmail = senderEmail
         self.emailClient = emailClient
         self.receiverEmails = receiverEmails
         self.mailServer = mailServer
         self.SID = SID
+        self.send_custom_sql = send_custom_sql
     def printEmailNotification(self):
         print("Email Client: ", self.emailClient)
         if self.senderEmail:
@@ -579,7 +581,7 @@ def checkAndConvertBooleanFlag(boolean, flagstring):
     return boolean
 
 def checkIfAcceptedFlag(word):
-    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-pr", "-ns", "-is", "-cs", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-scpa", "-scd", "-scs", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-hi", "-sh", "-hev", "-k", "-cpu"]:
+    if not word in ["-h", "--help", "-d", "--disclaimer", "-ff", "-oi", "-pt", "-ci", "-rm", "-rp", "-hm", "-nr", "-ir", "-mr", "-pr", "-ns", "-is", "-cs", "-cse", "-cq", "-iq", "-ks", "-nc", "-ic", "-ng", "-ig", "-np", "-ip", "-dp", "-wp", "-cf", "-ct", "-cd", "-if", "-tf", "-ar", "-sv", "-svp", "-od", "-odr", "-ol", "-olr", "-oc", "-sc", "-spi", "-scc", "-sct", "-scp", "-scn", "-scx", "-scpa", "-scd", "-scs", "-lf", "-en", "-enc", "-ens", "-enm", "-so", "-or", "-ssl", "-encr", "-sslk", "-sslt", "-sslp", "-ssln", "-vlh", "-hc", "-hi", "-sh", "-hev", "-k", "-cpu"]:
         print("INPUT ERROR: ", word, " is not one of the accepted input flags. Please see --help for more information.")
         os._exit(1)
 
@@ -876,6 +878,9 @@ def sqlCacheCheck(sccmanager, comman):
     oldestDayToTakeIntoAccountForStat = datetime.now() + timedelta(days = -int(sccmanager.nbrDaysToTakeIntoAcountForStat))
     hashes_with_engine_change = run_command(comman.hdbsql_string+' -j -A -a -x -U '+comman.dbuserkey+' "select STATEMENT_HASH from (select STATEMENT_HASH, '+change_type+' from _SYS_STATISTICS.HOST_SQL_PLAN_CACHE where SERVER_TIMESTAMP > \''+oldestDayToTakeIntoAccount.strftime('%Y-%m-%d')+' 00:00:00\' group by STATEMENT_HASH, '+change_type+' order by STATEMENT_HASH) group by STATEMENT_HASH having count(*) > 1"').splitlines(1)
     nbr_hashes_with_engine_change = len(hashes_with_engine_change)
+    if nbr_hashes_with_engine_change <= 0:
+        printout = "WARNING: No "+change_type_description+" were found. The reason could be that your selection with -sc* flags is too narrow. Another reason could be SSL. Check if querying _SYS_STATISTICS.HOST_SQL_PLAN_CACHE is different using hdbsql compared to HANA Studio (both with the hanasitter key user). If so, you might have to use -sslk and -sslt."
+        log(printout, comman)
     if nbr_hashes_with_engine_change > 0:
         hashes_with_engine_change = [hash.strip('\n').strip('|').strip(' ') for hash in hashes_with_engine_change]
         hashes_with_engine_change = "', '".join(hashes_with_engine_change)
@@ -1043,8 +1048,18 @@ def record_customsql(customsql, hdbcons, comman):   # for this record option -sv
     customsql_output_file.flush()
     customsql_output_file.close()
     stop_time = datetime.now()
-    printout = "Custom SQL Record , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          ,   -        , "+filename 
+    printout = "Custom SQL Record , "+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"    , "+str(stop_time-start_time)+"   ,   -          ,   -        , "+filename
     log(printout, comman)
+    global emailNotification
+    if emailNotification.send_custom_sql:         
+        message = 'Hi Team, \nYou requested output from the following custom SQL:\n\n   '+customsql.custom_sql_recording+'\n\nHere is the result:\n\n'+customsql_output
+        mailstring = 'echo "'+message+'" | '+emailNotification.emailClient+' -s "Custom SQL Result from HANASitter on '+emailNotification.SID+'" '
+        if emailNotification.mailServer:
+            mailstring += ' -S smtp=smtp://'+emailNotification.mailServer+' '
+        if emailNotification.senderEmail:
+            mailstring += ' -S from="'+emailNotification.senderEmail+'" '
+        mailstring += ",".join(emailNotification.receiverEmails)
+        output = run_command(mailstring, comman.out_run_command)
     time.sleep(customsql.custom_sql_interval)
     return printout 
 
@@ -1304,6 +1319,7 @@ def main():
     num_custom_sql_recordings = 0  #how many custom sqls?
     custom_sql_interval = 60 #seconds
     custom_sql_recording = '' #custom sql dump
+    send_custom_sql = "false" #no result from custom sql by email 
     custom_queries = [] # default: no custom queries
     custom_query_waits =  []
     num_callstacks = 0 #how many call stacks?
@@ -1408,6 +1424,7 @@ def main():
                     num_custom_sql_recordings           = getParameterFromFile(firstWord, '-ns', flagValue, flag_file, flag_log, num_custom_sql_recordings)
                     custom_sql_interval                 = getParameterFromFile(firstWord, '-is', flagValue, flag_file, flag_log, custom_sql_interval)
                     custom_sql_recording                = getParameterFromFile(firstWord, '-cs', flagValue, flag_file, flag_log, custom_sql_recording)
+                    send_custom_sql                     = getParameterFromFile(firstWord, '-cse', flagValue, flag_file, flag_log, send_custom_sql)
                     deliminiter_mode = '1' # default: deliminiter is , 
                     deliminiter_mode                    = getParameterFromFile(firstWord, '-cd', flagValue, flag_file, flag_log, deliminiter_mode)
                     if deliminiter_mode == '2':    
@@ -1489,6 +1506,7 @@ def main():
     num_custom_sql_recordings           = getParameterFromCommandLine(sys.argv, '-ns', flag_log, num_custom_sql_recordings)
     custom_sql_interval                 = getParameterFromCommandLine(sys.argv, '-is', flag_log, custom_sql_interval)
     custom_sql_recording                = getParameterFromCommandLine(sys.argv, '-cs', flag_log, custom_sql_recording)
+    send_custom_sql                     = getParameterFromCommandLine(sys.argv, '-cse', flag_log, send_custom_sql)
     deliminiter_mode = '1'       # default: deliminiter is , 
     deliminiter_mode                    = getParameterFromCommandLine(sys.argv, '-cd', flag_log, deliminiter_mode)
     if deliminiter_mode == '2':    
@@ -1860,6 +1878,15 @@ def main():
         if not custom_sql_recording[0:6].upper() == 'SELECT':
             log('INPUT ERROR: The -cs flag must be a SELECT statement. Please see --help for more information.', comman) 
             os._exit(1)
+    ### send_custom_sql, -cse
+    send_custom_sql = checkAndConvertBooleanFlag(send_custom_sql, "-cse")
+    if send_custom_sql:
+        if not custom_sql_recording:
+            log('INPUT ERROR: The -cse is true allthough -cs is not. This makes no sense. Please see --help for more information.', comman) 
+            os._exit(1)
+        if not receiver_emails:
+            log('INPUT ERROR: The -cse is true allthough -en is not. This makes no sense. Please see --help for more information.', comman) 
+            os._exit(1)
     ### custom_query_waits, -iq
     if len(custom_query_waits) != len(custom_queries):
         log('INPUT ERROR: The -iq flag must be of the same length as -cq. Please see --help for more information.', comman)
@@ -2060,7 +2087,7 @@ def main():
     ############# EMAIL NOTIFICATION ##############
     if receiver_emails:
         global emailNotification
-        emailNotification = EmailNotification(receiver_emails, email_client, senders_email, mail_server, SID)
+        emailNotification = EmailNotification(receiver_emails, email_client, senders_email, mail_server, SID, send_custom_sql)
 
     ### CREATE HDBCONS MANGER ###
     hdbcons = HdbconsManager(local_host, used_hosts, local_dbinstance, is_tenant, communicationPort, SID, rte_mode, tenantDBName, shell)
